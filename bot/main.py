@@ -299,20 +299,18 @@ def _format_created_at(value: str) -> str:
         timestamp = datetime.fromisoformat(value)
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=UTC)
-        return timestamp.astimezone().strftime("%d.%m.%Y %H:%M")
+        return timestamp.astimezone(MOSCOW_TZ).strftime("%d.%m.%Y %H:%M")
     except ValueError:
         return value
 
 
-async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if update.message is None or user is None:
-        return ConversationHandler.END
-
+def _fetch_user_submissions(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+) -> list[dict[str, str]] | None:
     valkey_client = context.application.bot_data.get("valkey_client")
     if valkey_client is None:
-        await update.message.reply_text("Хранилище недоступно, попробуйте позже.")
-        return ConversationHandler.END
+        return None
 
     prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
     applications_key = f"{prefix}:applications"
@@ -321,12 +319,10 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw_keys = valkey_client.smembers(applications_key)  # type: ignore[attr-defined]
     except Exception:
         logger.exception("Failed to fetch application list from Valkey")
-        await update.message.reply_text("Не удалось получить список заявок.")
-        return ConversationHandler.END
+        return None
 
     if not raw_keys:
-        await update.message.reply_text("У вас пока нет отправленных заявок.")
-        return ConversationHandler.END
+        return []
 
     submissions: list[dict[str, str]] = []
     for raw_key in raw_keys:
