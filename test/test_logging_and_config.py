@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import importlib
 from contextlib import contextmanager
 from pathlib import Path
 import sys
 import types
-from typing import Iterator
+from typing import Any, Iterator
+
+import pytest
+from pytest import MonkeyPatch
 
 
-def _install_stub_modules() -> None:
+@pytest.fixture(autouse=True, scope="module")
+def stub_external_modules() -> Iterator[None]:
+    monkeypatch = MonkeyPatch()
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
         for name in (
@@ -17,11 +23,11 @@ def _install_stub_modules() -> None:
             "InputMediaPhoto",
         ):
             setattr(telegram_module, name, type(name, (), {}))
-        sys.modules["telegram"] = telegram_module
+        monkeypatch.setitem(sys.modules, "telegram", telegram_module)
 
         telegram_error_module = types.ModuleType("telegram.error")
         telegram_error_module.BadRequest = type("BadRequest", (Exception,), {})
-        sys.modules["telegram.error"] = telegram_error_module
+        monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
 
     if "telegram.ext" not in sys.modules:
         ext_module = types.ModuleType("telegram.ext")
@@ -73,7 +79,7 @@ def _install_stub_modules() -> None:
         ext_module.ConversationHandler = _ConversationHandler
         ext_module.ContextTypes = types.SimpleNamespace(DEFAULT_TYPE=object())
         ext_module.filters = _Filters()
-        sys.modules["telegram.ext"] = ext_module
+        monkeypatch.setitem(sys.modules, "telegram.ext", ext_module)
 
     if "valkey" not in sys.modules:
         valkey_module = types.ModuleType("valkey")
@@ -101,25 +107,27 @@ def _install_stub_modules() -> None:
                 return None
 
         valkey_module.Valkey = _DummyValkey
-        sys.modules["valkey"] = valkey_module
+        monkeypatch.setitem(sys.modules, "valkey", valkey_module)
 
+    if "valkey.exceptions" not in sys.modules:
         valkey_exceptions = types.ModuleType("valkey.exceptions")
         valkey_exceptions.ConnectionError = type("ConnectionError", (Exception,), {})
-        sys.modules["valkey.exceptions"] = valkey_exceptions
+        monkeypatch.setitem(sys.modules, "valkey.exceptions", valkey_exceptions)
+
+    try:
+        yield
+    finally:
+        monkeypatch.undo()
 
 
-_install_stub_modules()
-
-from bot.main import (
-    ApplicationStore,
-    InMemoryValkey,
-    load_config,
-    logger,
-)
+@pytest.fixture(scope="module")
+def bot_main(stub_external_modules: None) -> types.ModuleType:
+    module = importlib.import_module("bot.main")
+    return importlib.reload(module)
 
 
 @contextmanager
-def capture_logs(level: str = "DEBUG") -> Iterator[list[object]]:
+def capture_logs(logger: Any, level: str = "DEBUG") -> Iterator[list[object]]:
     events: list[object] = []
 
     def sink(message: object) -> None:
@@ -144,7 +152,9 @@ def extract_messages(events: list[object]) -> list[str]:
     return messages
 
 
-def test_load_config_logs_and_parses(tmp_path: Path) -> None:
+def test_load_config_logs_and_parses(
+    tmp_path: Path, bot_main: types.ModuleType
+) -> None:
     config_path = tmp_path / "config.ini"
     config_path.write_text(
         """
@@ -160,8 +170,8 @@ redis_prefix = demo_prefix
 """.strip()
     )
 
-    with capture_logs(level="INFO") as events:
-        config = load_config(config_path)
+    with capture_logs(bot_main.logger, level="INFO") as events:
+        config = bot_main.load_config(config_path)
 
     assert config["token"] == "123456:ABC"
     assert config["moderator_chat_ids"] == [123, 456]
@@ -177,8 +187,10 @@ redis_prefix = demo_prefix
     assert any("Valkey host localhost:6379" in message for message in messages)
 
 
-def test_application_store_emits_logging(tmp_path: Path) -> None:
-    store = ApplicationStore(InMemoryValkey(), prefix="test")
+def test_application_store_emits_logging(
+    tmp_path: Path, bot_main: types.ModuleType
+) -> None:
+    store = bot_main.ApplicationStore(bot_main.InMemoryValkey(), prefix="test")
     photo_path = tmp_path / "example.jpg"
     photo_path.write_text("content", encoding="utf-8")
 
@@ -188,7 +200,7 @@ def test_application_store_emits_logging(tmp_path: Path) -> None:
         "photos": [],
     }
 
-    with capture_logs(level="DEBUG") as events:
+    with capture_logs(bot_main.logger, level="DEBUG") as events:
         store.init_session(42, initial_data)
         store.set_fields(42, position="Chair")
         photos = store.append_photo(42, photo_path)

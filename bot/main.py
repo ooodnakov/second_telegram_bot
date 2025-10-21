@@ -186,10 +186,10 @@ class ApplicationStore:
         key = self._session_key(user_id)
         self._client.hset(key, mapping=self._serialize(fields))
         logger.debug(
-            "Updated session {} for user {} with fields {}",
+            "Updated session {} for user {} with field keys {}",
             key,
             user_id,
-            fields,
+            sorted(fields.keys()),
         )
 
     def append_photo(self, user_id: int, photo_path: Path) -> list[Path]:
