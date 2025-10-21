@@ -1,3 +1,12 @@
 [telegram]
 # Replace with your real bot token from BotFather
 token = 1234567890:ABCdefGhIJKlmnoPQRstuVWxyz
+# Optional: comma-separated chat IDs that receive completed submissions
+# moderator_chat_ids = 123456789,987654321
+
+[valkey]
+# Valkey Configuration
+valkey_host = valkey_common
+valkey_port = 6379
+valkey_pass = redis
+redis_prefix = second_hand

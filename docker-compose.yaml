@@ -3,7 +3,7 @@ services:
     container_name: second_hand_bot
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: dockerfile
     restart: no
     networks:
       - proxy
@@ -20,4 +20,3 @@ networks:
   proxy:
     external: true
     name: proxy
-
