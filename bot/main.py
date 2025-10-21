@@ -1,11 +1,16 @@
 import json
 import os
 from configparser import ConfigParser
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+
+try:
+    from datetime import UTC
+except ImportError:  # pragma: no cover - python <3.11 fallback
+    UTC = timezone.utc  # type: ignore[assignment]
 
 from bot.logger_setup import setup_logger
 
@@ -31,8 +36,6 @@ from telegram.ext import (
 )
 from valkey import Valkey
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
-
-from bot.logger_setup import setup_logger
 
 
 LIST_PAGE_SIZE = 5
