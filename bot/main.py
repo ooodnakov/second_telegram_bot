@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from telegram import (
     Update,
@@ -34,6 +35,9 @@ logger = setup_logger()
 
 # Этапы диалога
 (POSITION, CONDITION, PHOTOS, SIZE, MATERIAL, DESCRIPTION, PRICE, CONTACTS) = range(8)
+
+LIST_PAGE_SIZE = 5
+MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.ini"
 CONFIG_SECTION = "telegram"
