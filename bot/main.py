@@ -165,7 +165,7 @@ class ApplicationStore:
         raw = self._client.hgetall(key)
         if not raw:
             return {}
-        session = self._deserialize(raw)
+        session = self._deserialize(raw)  # type: ignore
         session.setdefault("photos", [])
         return session
 
@@ -305,10 +305,10 @@ async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_condition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    await query.answer()  # type: ignore
     store = _get_application_store(context)
-    store.set_fields(query.from_user.id, condition=query.data, photos=[])
-    await query.edit_message_text("Отправьте 2–5 фото позиции")
+    store.set_fields(query.from_user.id, condition=query.data, photos=[])  # type: ignore
+    await query.edit_message_text("Отправьте 2–5 фото позиции")  # type: ignore
     return PHOTOS
 
 
@@ -370,7 +370,7 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Введите *размер:*", parse_mode="Markdown")
+    await update.message.reply_text("Введите *размер:*", parse_mode="Markdown")  # type: ignore
     return SIZE
 
 
@@ -462,7 +462,7 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Заявка отменена")
+    await update.message.reply_text("Заявка отменена")  # type: ignore
     return ConversationHandler.END
 
 
@@ -523,12 +523,13 @@ async def _send_photo_prompt(
     if previous_message_id:
         try:
             await context.bot.delete_message(
-                chat_id=update.effective_chat.id, message_id=previous_message_id
+                chat_id=update.effective_chat.id,
+                message_id=previous_message_id,  # type: ignore
             )
         except BadRequest:
             pass
 
-    message = await update.message.reply_text(text, parse_mode=parse_mode)
+    message = await update.message.reply_text(text, parse_mode=parse_mode)  # type: ignore
     user_data["_photo_prompt_message_id"] = message.message_id
     user = update.effective_user
     if user is not None:
