@@ -37,7 +37,6 @@ from telegram.ext import (
 from valkey import Valkey
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
-
 LIST_PAGE_SIZE = 5
 try:
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
