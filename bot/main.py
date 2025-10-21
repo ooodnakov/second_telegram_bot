@@ -7,28 +7,25 @@ from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from bot.logger_setup import setup_logger
 from telegram import (
-    Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    Update,
 )
 from telegram.error import BadRequest
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
-    MessageHandler,
-    filters,
     ContextTypes,
     ConversationHandler,
-    CallbackQueryHandler,
+    MessageHandler,
+    filters,
 )
-
 from valkey import Valkey
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
-
-from bot.logger_setup import setup_logger
-
 
 logger = setup_logger()
 
