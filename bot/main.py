@@ -239,9 +239,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message is None or user is None:
         return ConversationHandler.END
 
+    await update.message.reply_text("Привет! Добро пожаловать.")
+    await update.message.reply_text(
+        "Чтобы отправить новую заявку, используйте команду /new."
+    )
+    return ConversationHandler.END
+
+
+async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        return ConversationHandler.END
+
     store = _get_application_store(context)
     await update.message.reply_text(
-        "Привет! Отправь заявку.\n\nВведите *название позиции:*",
+        "Введите *название позиции:*",
         parse_mode="Markdown",
     )
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
@@ -257,6 +269,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
     )
     return POSITION
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        "Доступные команды:\n"
+        "/start — приветствие и краткая инструкция.\n"
+        "/new — отправить новую заявку.\n"
+        "/cancel — отменить текущую заявку.",
+    )
+    return ConversationHandler.END
 
 
 async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -295,13 +321,13 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = _get_application_store(context)
     user_data = store.get(user.id)
     if not user_data:
-        await update.message.reply_text("Сессия не найдена, отправьте /start")
+        await update.message.reply_text("Сессия не найдена, отправьте /new")
         return ConversationHandler.END
 
     photo_file_id = update.message.photo[-1].file_id
     session_dir: Path | None = user_data.get("session_dir")
     if session_dir is None:
-        await update.message.reply_text("Ошибка сохранения фото, отправьте /start")
+        await update.message.reply_text("Ошибка сохранения фото, отправьте /new")
         return ConversationHandler.END
 
     photo_index = len(user_data["photos"]) + 1
@@ -407,7 +433,7 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store.set_fields(user_id, contacts=update.message.text)
     user_data = store.get(user_id)
     if not user_data:
-        await update.message.reply_text("Сессия не найдена, отправьте /start")
+        await update.message.reply_text("Сессия не найдена, отправьте /new")
         return ConversationHandler.END
 
     text = (
@@ -455,7 +481,7 @@ def main():
     app.bot_data["moderator_chat_ids"] = config.get("moderator_chat_ids", [])
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[CommandHandler("new", new)],
         states={
             POSITION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_position)],
             CONDITION: [CallbackQueryHandler(get_condition)],
@@ -474,6 +500,8 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
     app.run_polling()
