@@ -120,6 +120,9 @@ class InMemoryValkey:
     def sadd(self, name: str, key: str) -> None:
         self._sets.setdefault(name, set()).add(key)
 
+    def smembers(self, name: str) -> set[str]:
+        return self._sets.get(name, set()).copy()
+
     def delete(self, *names: str) -> None:
         for name in names:
             self._hashes.pop(name, None)
@@ -279,8 +282,95 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Доступные команды:\n"
         "/start — приветствие и краткая инструкция.\n"
         "/new — отправить новую заявку.\n"
+        "/list — показать отправленные заявки.\n"
         "/cancel — отменить текущую заявку.",
     )
+    return ConversationHandler.END
+
+
+def _format_created_at(value: str) -> str:
+    if not value:
+        return "—"
+    try:
+        timestamp = datetime.fromisoformat(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=UTC)
+        return timestamp.astimezone().strftime("%d.%m.%Y %H:%M")
+    except ValueError:
+        return value
+
+
+async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        return ConversationHandler.END
+
+    valkey_client = context.application.bot_data.get("valkey_client")
+    if valkey_client is None:
+        await update.message.reply_text("Хранилище недоступно, попробуйте позже.")
+        return ConversationHandler.END
+
+    prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
+    applications_key = f"{prefix}:applications"
+
+    try:
+        raw_keys = valkey_client.smembers(applications_key)  # type: ignore[attr-defined]
+    except Exception:
+        logger.exception("Failed to fetch application list from Valkey")
+        await update.message.reply_text("Не удалось получить список заявок.")
+        return ConversationHandler.END
+
+    if not raw_keys:
+        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        return ConversationHandler.END
+
+    submissions: list[dict[str, str]] = []
+    for raw_key in raw_keys:
+        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+        try:
+            raw_data = valkey_client.hgetall(key)
+        except Exception:
+            logger.exception("Failed to fetch application data for key %s", key)
+            continue
+        if not raw_data:
+            continue
+
+        record: dict[str, str] = {}
+        for raw_field, raw_value in raw_data.items():
+            field = raw_field.decode() if isinstance(raw_field, bytes) else raw_field
+            value = raw_value.decode() if isinstance(raw_value, bytes) else raw_value
+            record[field] = value
+
+        if record.get("user_id") != str(user.id):
+            continue
+        submissions.append(record)
+
+    if not submissions:
+        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        return ConversationHandler.END
+
+    submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+
+    lines = []
+    for idx, record in enumerate(submissions[:10], start=1):
+        created_at = _format_created_at(record.get("created_at", ""))
+        position = record.get("position", "—")
+        condition = record.get("condition", "—")
+        price = record.get("price", "—")
+        contacts = record.get("contacts", "—")
+        lines.append(
+            f"{idx}. {position} ({condition}) — {price}\n"
+            f"   Контакты: {contacts}\n"
+            f"   Отправлено: {created_at}"
+        )
+
+    if len(submissions) > 10:
+        lines.append(
+            f"Показаны последние 10 из {len(submissions)} заявок. "
+            "Уточните у админов для полного списка."
+        )
+
+    await update.message.reply_text("\n\n".join(lines))
     return ConversationHandler.END
 
 
@@ -501,6 +591,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("list", list_applications))
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
     app.run_polling()
