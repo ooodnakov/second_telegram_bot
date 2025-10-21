@@ -523,7 +523,7 @@ async def _send_photo_prompt(
     if previous_message_id:
         try:
             await context.bot.delete_message(
-                chat_id=update.effective_chat.id,
+                chat_id=update.effective_chat.id,  # type: ignore
                 message_id=previous_message_id,  # type: ignore
             )
         except BadRequest:
