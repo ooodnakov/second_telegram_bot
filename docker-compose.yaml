@@ -8,7 +8,10 @@ services:
     networks:
       - proxy
     volumes:
-      - ./:/workspace
+      - ./bot:/workspace/bot
+      - ./media:/workspace/media
+      - ./config.ini:/workspace/config.ini:ro
+      - ./pyproject.toml:/workspace/pyproject.toml:ro
     user: 1001:1001
     env_file: .env
     deploy:
