@@ -670,11 +670,13 @@ def main():
             CONTACTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contacts)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=True,
     )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("list", list_applications))
+    app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:\\d+:\\d+$"))
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
     app.run_polling()
