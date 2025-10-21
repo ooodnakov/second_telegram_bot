@@ -43,7 +43,7 @@ log_cli_date_format = "%Y-%m-%d %H:%M:%S"
 
 [tool.ruff]
 
-src = ["telegram_auto_poster", "test"]
+src = ["bot", "test"]
 # Exclude a variety of commonly ignored directories.
 exclude = [
     ".bzr",
@@ -71,7 +71,7 @@ exclude = [
     "telegram_auto_poster/locales",
 ]
 
-include = ["pyproject.toml", "telegram_auto_poster/*"]
+include = ["pyproject.toml", "bot/*", "test/*"]
 # Same as Black.
 line-length = 88
 indent-width = 4

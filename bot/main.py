@@ -50,16 +50,22 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load bot configuration from ini file."""
     config_source = path or os.environ.get("CONFIG_PATH") or DEFAULT_CONFIG_PATH
     config_path = Path(config_source).expanduser()
+    logger.debug("Loading configuration from {}", config_path)
 
     parser = ConfigParser()
     if not parser.read(config_path, encoding="utf-8"):
+        logger.error("Config file not found or unreadable: {}", config_path)
         raise RuntimeError(f"Config file not found or unreadable: {config_path}")
 
     if not parser.has_section(CONFIG_SECTION):
+        logger.error(
+            "Section '{}' missing in config file {}", CONFIG_SECTION, config_path
+        )
         raise RuntimeError(f"Section '{CONFIG_SECTION}' missing in config file.")
 
     token = parser.get(CONFIG_SECTION, "token", fallback="").strip()
     if not token:
+        logger.error("Telegram bot token is missing in the config file {}", config_path)
         raise RuntimeError("Telegram bot token is missing in the config file.")
 
     moderators: list[int] = []
@@ -74,18 +80,24 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             try:
                 moderators.append(int(candidate))
             except ValueError as exc:
+                logger.error("Invalid moderator chat id encountered: {}", candidate)
                 raise RuntimeError(f"Invalid moderator chat id: {candidate!r}") from exc
 
     if not parser.has_section(VALKEY_CONFIG_SECTION):
+        logger.error(
+            "Section '{}' missing in config file {}", VALKEY_CONFIG_SECTION, config_path
+        )
         raise RuntimeError(f"Section '{VALKEY_CONFIG_SECTION}' missing in config file.")
 
     host = parser.get(VALKEY_CONFIG_SECTION, "valkey_host", fallback="").strip()
     if not host:
+        logger.error("Valkey host is missing in the config file {}", config_path)
         raise RuntimeError("Valkey host is missing in the config file.")
 
     try:
         port = parser.getint(VALKEY_CONFIG_SECTION, "valkey_port")
     except ValueError as exc:
+        logger.error("Valkey port must be an integer in {}", config_path)
         raise RuntimeError("Valkey port must be an integer.") from exc
 
     password = parser.get(VALKEY_CONFIG_SECTION, "valkey_pass", fallback="").strip()
@@ -94,6 +106,14 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             VALKEY_CONFIG_SECTION, "redis_prefix", fallback="telegram_auto_poster"
         ).strip()
         or "telegram_auto_poster"
+    )
+
+    logger.info(
+        "Configuration loaded for {} moderators and Valkey host {}:{} with prefix '{}'",
+        len(moderators),
+        host,
+        port,
+        prefix,
     )
 
     return {
@@ -153,31 +173,57 @@ class ApplicationStore:
         key = self._session_key(user_id)
         self._client.delete(key)
         self._client.hset(key, mapping=self._serialize(data))
+        logger.debug(
+            "Initialized session {} for user {} with data keys {}",
+            key,
+            user_id,
+            sorted(data.keys()),
+        )
 
     def set_fields(self, user_id: int, **fields: Any) -> None:
         if not fields:
             return
         key = self._session_key(user_id)
         self._client.hset(key, mapping=self._serialize(fields))
+        logger.debug(
+            "Updated session {} for user {} with fields {}",
+            key,
+            user_id,
+            fields,
+        )
 
     def append_photo(self, user_id: int, photo_path: Path) -> list[Path]:
         session = self.get(user_id)
         photos = session.get("photos", [])
         photos.append(photo_path)
         self.set_fields(user_id, photos=photos)
+        logger.debug(
+            "Appended photo {} for user {} (total now {})",
+            photo_path,
+            user_id,
+            len(photos),
+        )
         return photos
 
     def get(self, user_id: int) -> dict[str, Any]:
         key = self._session_key(user_id)
         raw = self._client.hgetall(key)
         if not raw:
+            logger.debug("No existing session found for user {}", user_id)
             return {}
         session = self._deserialize(raw)  # type: ignore
         session.setdefault("photos", [])
+        logger.debug(
+            "Loaded session {} for user {} with keys {}",
+            key,
+            user_id,
+            sorted(session.keys()),
+        )
         return session
 
     def clear(self, user_id: int) -> None:
         self._client.delete(self._session_key(user_id))
+        logger.debug("Cleared session for user {}", user_id)
 
     def _serialize(self, data: dict[str, Any]) -> dict[str, str]:
         serialized: dict[str, str] = {}
@@ -243,8 +289,10 @@ def create_valkey_client(settings: dict[str, Any]) -> Valkey | InMemoryValkey:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Received /start update without message or user: {}", update)
         return ConversationHandler.END
 
+    logger.info("User {} invoked /start", user.id)
     await update.message.reply_text("Привет! Добро пожаловать.")
     await update.message.reply_text(
         "Чтобы отправить новую заявку, используйте команду /new."
@@ -255,6 +303,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Received /new update without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
@@ -266,6 +315,11 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_dir = MEDIA_ROOT / f"{user.id}_{timestamp}_{uuid4().hex[:6]}"
     session_dir.mkdir(parents=True, exist_ok=True)
     session_key = session_dir.name
+    logger.info(
+        "Starting new submission workflow for user {} with session {}",
+        user.id,
+        session_key,
+    )
     store.init_session(
         user.id,
         {
@@ -280,8 +334,10 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Received /help update without message or user: {}", update)
         return ConversationHandler.END
 
+    logger.info("User {} requested help", user.id)
     await update.message.reply_text(
         "Доступные команды:\n"
         "/start — приветствие и краткая инструкция.\n"
@@ -310,6 +366,10 @@ def _fetch_user_submissions(
 ) -> list[dict[str, str]] | None:
     valkey_client = context.application.bot_data.get("valkey_client")
     if valkey_client is None:
+        logger.warning(
+            "Valkey client not configured; cannot fetch submissions for user {}",
+            user_id,
+        )
         return None
 
     prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
@@ -322,6 +382,7 @@ def _fetch_user_submissions(
         return None
 
     if not raw_keys:
+        logger.info("No submissions stored for user {}", user_id)
         return []
 
     submissions: list[dict[str, str]] = []
@@ -330,7 +391,7 @@ def _fetch_user_submissions(
         try:
             raw_data = valkey_client.hgetall(key)
         except Exception:
-            logger.exception("Failed to fetch application data for key %s", key)
+            logger.exception("Failed to fetch application data for key {}", key)
             continue
         if not raw_data:
             continue
@@ -346,6 +407,11 @@ def _fetch_user_submissions(
         submissions.append(record)
 
     submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    logger.info(
+        "Fetched {} submissions for user {} from Valkey",
+        len(submissions),
+        user_id,
+    )
     return submissions
 
 
@@ -356,6 +422,7 @@ def _render_applications_page(
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     total = len(submissions)
     if total == 0:
+        logger.debug("Rendering empty applications page for user {}", user_id)
         return ("У вас пока нет отправленных заявок.", None)
 
     total_pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
@@ -393,31 +460,43 @@ def _render_applications_page(
         )
 
     keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
+    logger.debug(
+        "Rendered applications page {} for user {} ({} total submissions)",
+        page + 1,
+        user_id,
+        total,
+    )
     return text, keyboard
 
 
 async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Received /list update without message or user: {}", update)
         return ConversationHandler.END
 
+    logger.info("User {} requested submission list", user.id)
     submissions = _fetch_user_submissions(context, user.id)
     if submissions is None:
         await update.message.reply_text("Хранилище недоступно, попробуйте позже.")
+        logger.error("Valkey unavailable when fetching list for user {}", user.id)
         return ConversationHandler.END
     if not submissions:
         await update.message.reply_text("У вас пока нет отправленных заявок.")
+        logger.info("User {} has no submissions stored", user.id)
         return ConversationHandler.END
 
     context.user_data["list_submissions"] = submissions  # type: ignore
     text, keyboard = _render_applications_page(submissions, 0, user.id)
     await update.message.reply_text(text, reply_markup=keyboard)
+    logger.debug("Displayed submissions page 1 for user {}", user.id)
     return ConversationHandler.END
 
 
 async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None:
+        logger.warning("Received pagination update without callback query: {}", update)
         return
 
     data = query.data or ""
@@ -427,12 +506,17 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         expected_user_id = int(user_id_raw)
     except (ValueError, AttributeError):
         await query.answer()
-        logger.warning("Received malformed pagination payload: %s", data)
+        logger.warning("Received malformed pagination payload: {}", data)
         return
 
     user = query.from_user
     if user is None or user.id != expected_user_id:
         await query.answer("Эта навигация недоступна.", show_alert=True)
+        logger.warning(
+            "User {} attempted to paginate submissions for user {}",
+            getattr(user, "id", "unknown"),
+            expected_user_id,
+        )
         return
 
     submissions = context.user_data.get("list_submissions")  # type: ignore
@@ -443,9 +527,11 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if submissions is None:
         await query.edit_message_text("Хранилище недоступно, попробуйте позже.")
+        logger.error("Valkey unavailable during pagination for user {}", user.id)
         return
     if not submissions:
         await query.edit_message_text("У вас пока нет отправленных заявок.")
+        logger.info("User {} has no submissions to paginate", user.id)
         return
 
     text, keyboard = _render_applications_page(submissions, page, user.id)
@@ -453,17 +539,28 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await query.edit_message_text(text, reply_markup=keyboard)
     except BadRequest as exc:
         if "message is not modified" in str(exc).lower():
+            logger.debug(
+                "Pagination request for user {} ignored because message not modified",
+                user.id,
+            )
             return
         raise
+    logger.debug("User {} navigated to submissions page {}", user.id, page + 1)
 
 
 async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Position handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     store.set_fields(user.id, position=update.message.text)
+    logger.info(
+        "User {} provided position: {}",
+        user.id,
+        update.message.text,
+    )
     keyboard = [
         [
             InlineKeyboardButton("Б/У", callback_data="Б/У"),
@@ -478,27 +575,44 @@ async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_condition(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()  # type: ignore
+    if query is None or query.from_user is None:
+        logger.warning("Condition handler invoked without callback query: {}", update)
+        return ConversationHandler.END
+
+    await query.answer()
     store = _get_application_store(context)
-    store.set_fields(query.from_user.id, condition=query.data, photos=[])  # type: ignore
-    await query.edit_message_text("Отправьте 2–5 фото позиции")  # type: ignore
+    store.set_fields(query.from_user.id, condition=query.data, photos=[])
+    logger.info(
+        "User {} selected condition {}",
+        query.from_user.id,
+        query.data,
+    )
+    await query.edit_message_text("Отправьте 2–5 фото позиции")
     return PHOTOS
 
 
 async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Photo handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     user_data = store.get(user.id)
     if not user_data:
+        logger.warning("Photo handler could not locate session for user {}", user.id)
         await update.message.reply_text("Сессия не найдена, отправьте /new")
         return ConversationHandler.END
+
+    if not update.message.photo:
+        logger.warning("User {} sent non-photo message during photo step", user.id)
+        await update.message.reply_text("Пожалуйста, отправьте фото позиции")
+        return PHOTOS
 
     photo_file_id = update.message.photo[-1].file_id
     session_dir: Path | None = user_data.get("session_dir")
     if session_dir is None:
+        logger.error("Session directory missing for user {}", user.id)
         await update.message.reply_text("Ошибка сохранения фото, отправьте /new")
         return ConversationHandler.END
 
@@ -509,12 +623,19 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filename = f"photo_{photo_index:02d}{file_suffix}"
     saved_path = session_dir / filename
     await telegram_file.download_to_drive(custom_path=str(saved_path))
+    logger.info(
+        "Saved photo {} for user {} to {}",
+        photo_index,
+        user.id,
+        saved_path,
+    )
 
     photos = store.append_photo(user.id, saved_path)
     user_data["photos"] = photos
 
     count = len(photos)
     if count < 2:
+        logger.debug("User {} has {} photos; requesting more", user.id, count)
         await _send_photo_prompt(
             update,
             context,
@@ -523,6 +644,9 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return PHOTOS
     elif count < 5:
+        logger.debug(
+            "User {} has {} photos; prompting for optional uploads", user.id, count
+        )
         await _send_photo_prompt(
             update,
             context,
@@ -532,6 +656,7 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return PHOTOS
     else:
+        logger.debug("User {} reached maximum photo count", user.id)
         await _send_photo_prompt(
             update,
             context,
@@ -543,6 +668,10 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(
+        "User {} opted to skip additional photos",
+        getattr(update.effective_user, "id", "unknown"),
+    )
     await update.message.reply_text("Введите *размер:*", parse_mode="Markdown")  # type: ignore
     return SIZE
 
@@ -550,10 +679,12 @@ async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Size handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     store.set_fields(user.id, size=update.message.text)
+    logger.info("User {} provided size: {}", user.id, update.message.text)
     await update.message.reply_text("Введите *материал:*", parse_mode="Markdown")
     return MATERIAL
 
@@ -561,10 +692,12 @@ async def get_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Material handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     store.set_fields(user.id, material=update.message.text)
+    logger.info("User {} provided material: {}", user.id, update.message.text)
     await update.message.reply_text(
         "Введите *короткое описание:*", parse_mode="Markdown"
     )
@@ -574,10 +707,12 @@ async def get_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Description handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     store.set_fields(user.id, description=update.message.text)
+    logger.info("User {} provided description", user.id)
     await update.message.reply_text("Введите *цену:*", parse_mode="Markdown")
     return PRICE
 
@@ -585,10 +720,12 @@ async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Price handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     store.set_fields(user.id, price=update.message.text)
+    logger.info("User {} provided price: {}", user.id, update.message.text)
     await update.message.reply_text(
         "Теперь оставьте ваши контакты (телефон, @username и т.д.)"
     )
@@ -598,13 +735,16 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if update.message is None or user is None:
+        logger.warning("Contacts handler called without message or user: {}", update)
         return ConversationHandler.END
 
     store = _get_application_store(context)
     user_id = user.id
     store.set_fields(user_id, contacts=update.message.text)
+    logger.info("User {} provided contact details", user_id)
     user_data = store.get(user_id)
     if not user_data:
+        logger.error("Submission data missing when finalizing for user {}", user_id)
         await update.message.reply_text("Сессия не найдена, отправьте /new")
         return ConversationHandler.END
 
@@ -620,6 +760,11 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     photos = [Path(photo_path) for photo_path in user_data["photos"]]
+    logger.debug(
+        "User {} submission includes {} photos",
+        user_id,
+        len(photos),
+    )
     await _send_submission_photos(
         context.bot,
         update.effective_chat.id if update.effective_chat else user_id,
@@ -627,30 +772,47 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await update.message.reply_text(text, parse_mode="Markdown")
+    logger.info(
+        "Persisting submission for user {} with session {}",
+        user_id,
+        user_data.get("session_key"),
+    )
     _persist_application(update, context, user_data)
     await _forward_to_moderators(context, text, photos)
     await update.message.reply_text("Заявка успешно отправлена! Спасибо.")
+    logger.info("Submission for user {} processed successfully", user_id)
     store.clear(user_id)
     return ConversationHandler.END
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(
+        "User {} cancelled submission",
+        getattr(update.effective_user, "id", "unknown"),
+    )
     await update.message.reply_text("Заявка отменена")  # type: ignore
     return ConversationHandler.END
 
 
 def main():
+    logger.info("Starting Telegram bot initialization")
     try:
         config = load_config()
     except RuntimeError as exc:
         raise SystemExit(f"Failed to load configuration: {exc}") from exc
 
     app = ApplicationBuilder().token(config["token"]).build()
+    logger.debug("Application builder created")
 
     valkey_client = create_valkey_client(config)
     app.bot_data["valkey_client"] = valkey_client
     app.bot_data["valkey_prefix"] = config["valkey"]["prefix"]
     app.bot_data["moderator_chat_ids"] = config.get("moderator_chat_ids", [])
+    logger.debug(
+        "Bot data configured with Valkey prefix {} and {} moderator chats",
+        config["valkey"]["prefix"],
+        len(app.bot_data["moderator_chat_ids"]),
+    )
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("new", new)],
@@ -679,6 +841,7 @@ def main():
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:\\d+:\\d+$"))
     app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
+    logger.info("Handlers registered; starting polling")
     app.run_polling()
 
 
@@ -711,6 +874,11 @@ async def _send_photo_prompt(
     if user is not None:
         store = _get_application_store(context)
         store.set_fields(user.id, _photo_prompt_message_id=message.message_id)
+    logger.debug(
+        "Sent photo prompt to user {} with message id {}",
+        getattr(update.effective_user, "id", "unknown"),
+        message.message_id,
+    )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -727,8 +895,14 @@ async def _send_submission_photos(
 ) -> None:
     existing_photos = [photo_path for photo_path in photos if photo_path.exists()]
     if not existing_photos:
+        logger.debug("No existing photos to send to chat {}", chat_id)
         return
 
+    logger.debug(
+        "Sending {} photos to chat {}",
+        len(existing_photos),
+        chat_id,
+    )
     if len(existing_photos) > 1:
         media_group: list[InputMediaPhoto] = []
         open_files = []
@@ -744,10 +918,15 @@ async def _send_submission_photos(
                 )
             try:
                 await bot.send_media_group(chat_id=chat_id, media=media_group)
+                logger.debug(
+                    "Sent media group with {} photos to chat {}",
+                    len(existing_photos),
+                    chat_id,
+                )
                 return
             except BadRequest:
                 logger.exception(
-                    "Failed to send media group to chat %s; sending individually",
+                    "Failed to send media group to chat {}; sending individually",
                     chat_id,
                 )
                 await _send_photos_individually(bot, chat_id, existing_photos)
@@ -761,6 +940,7 @@ async def _send_submission_photos(
                 chat_id=chat_id,
                 photo=photo_file,
             )
+        logger.debug("Sent single photo to chat {}", chat_id)
 
 
 async def _send_photos_individually(
@@ -771,7 +951,7 @@ async def _send_photos_individually(
     for photo_path in photos:
         if not photo_path.exists():
             logger.warning(
-                "Skipping missing photo %s when sending to chat %s",
+                "Skipping missing photo {} when sending to chat {}",
                 photo_path,
                 chat_id,
             )
@@ -783,9 +963,12 @@ async def _send_photos_individually(
                     chat_id=chat_id,
                     photo=photo_file,
                 )
+            logger.debug(
+                "Sent fallback individual photo {} to chat {}", photo_path, chat_id
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
-                "Failed to send individual photo %s to chat %s", photo_path, chat_id
+                "Failed to send individual photo {} to chat {}", photo_path, chat_id
             )
 
 
@@ -796,6 +979,7 @@ async def _forward_to_moderators(
 ) -> None:
     chat_ids: list[int] = context.application.bot_data.get("moderator_chat_ids") or []
     if not chat_ids:
+        logger.debug("No moderator chat ids configured; skipping forwarding")
         return
 
     for chat_id in chat_ids:
@@ -806,9 +990,10 @@ async def _forward_to_moderators(
                 text=text,
                 parse_mode="Markdown",
             )
+            logger.info("Forwarded submission to moderator chat {}", chat_id)
         except Exception:  # noqa: BLE001
             logger.exception(
-                "Failed to forward submission to moderator chat %s", chat_id
+                "Failed to forward submission to moderator chat {}", chat_id
             )
 
 
@@ -819,6 +1004,7 @@ def _persist_application(
 ) -> None:
     valkey_client: Valkey | None = context.application.bot_data.get("valkey_client")
     if not valkey_client:
+        logger.warning("Valkey client missing; skipping persistence")
         return
 
     prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
@@ -850,10 +1036,20 @@ def _persist_application(
     }
 
     valkey_key = f"{prefix}:{record['session_key']}"
+    logger.debug(
+        "Persisting submission for user {} under key {}",
+        user.id,
+        valkey_key,
+    )
 
     try:
         valkey_client.hset(valkey_key, mapping=record)
         valkey_client.sadd(f"{prefix}:applications", valkey_key)
+        logger.info(
+            "Persisted submission for user {} under key {}",
+            user.id,
+            valkey_key,
+        )
     except Exception:  # noqa: BLE001
         logger.exception("Failed to persist application data to Valkey")
 
