@@ -1,13 +1,18 @@
 import json
 import os
 from configparser import ConfigParser
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from bot.logger_setup import setup_logger
+
+try:
+    from zoneinfo import ZoneInfoNotFoundError
+except ImportError:  # pragma: no cover - python <3.11 fallback
+    ZoneInfoNotFoundError = Exception  # type: ignore
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -27,14 +32,25 @@ from telegram.ext import (
 from valkey import Valkey
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
+from bot.logger_setup import setup_logger
+
+
+LIST_PAGE_SIZE = 5
+try:
+    MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+    _MOSCOW_TZ_FALLBACK = False
+except ZoneInfoNotFoundError:  # pragma: no cover - depends on system tzdata
+    MOSCOW_TZ = timezone(timedelta(hours=3))
+    _MOSCOW_TZ_FALLBACK = True
 logger = setup_logger()
+if _MOSCOW_TZ_FALLBACK:
+    logger.warning(
+        "Timezone data for Europe/Moscow not found; falling back to UTC+3 offset."
+    )
 
 
 # Этапы диалога
 (POSITION, CONDITION, PHOTOS, SIZE, MATERIAL, DESCRIPTION, PRICE, CONTACTS) = range(8)
-
-LIST_PAGE_SIZE = 5
-MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.ini"
 CONFIG_SECTION = "telegram"
@@ -303,7 +319,14 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Received /new update without message or user: {}", update)
         return ConversationHandler.END
 
-    store = _get_application_store(context)
+    try:
+        store = _get_application_store(context)
+    except RuntimeError as exc:
+        logger.exception("Failed to obtain application store for user %s", user.id)
+        await update.message.reply_text(
+            "Хранилище недоступно, попробуйте позже или обратитесь к администратору."
+        )
+        return ConversationHandler.END
     await update.message.reply_text(
         "Введите *название позиции:*",
         parse_mode="Markdown",
