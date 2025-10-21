@@ -25,6 +25,7 @@ from telegram.ext import (
 )
 
 from valkey import Valkey
+from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
 from bot.logger_setup import setup_logger
 
@@ -222,6 +223,12 @@ def create_valkey_client(settings: dict[str, Any]) -> Valkey | InMemoryValkey:
             valkey_settings["port"],
         )
         return client
+    except ValkeyConnectionError as exc:
+        logger.warning(
+            "Valkey connection unavailable ({}). Falling back to in-memory store",
+            exc,
+        )
+        return InMemoryValkey()
     except Exception:  # noqa: BLE001
         logger.exception("Valkey connection failed. Falling back to in-memory store")
         return InMemoryValkey()
