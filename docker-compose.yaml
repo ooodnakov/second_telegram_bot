@@ -1,0 +1,23 @@
+services:
+  second_hand:
+    container_name: second_hand_bot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: no
+    networks:
+      - proxy
+    volumes:
+      - ./:/workspace
+    env_file: .env
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+networks:
+  proxy:
+    external: true
+    name: proxy
+

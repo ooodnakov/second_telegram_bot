@@ -1,0 +1,37 @@
+{
+    "ruff.interpreter": [
+        "/home/rem/Documents/gits/second_telegram_bot/.venv/bin/python"
+    ],
+    "python.defaultInterpreterPath": "/home/rem/Documents/gits/second_telegram_bot/.venv/bin/python",
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnPaste": true,
+    "editor.formatOnSave": true,
+    "cursor.general.globalCursorIgnoreList": [
+        "**/.env",
+        "**/.env.*",
+        "**/credentials.json",
+        "**/credentials.*.json",
+        "**/secret.json",
+        "**/secrets.json",
+        "**/*.key",
+        "**/*.pem",
+        "**/*.pfx",
+        "**/*.p12",
+        "**/*.crt",
+        "**/*.cer",
+        "**/id_rsa",
+        "**/id_dsa",
+        "**/.ssh/id_*",
+        "**/__pycache__/**"
+    ],
+    "files.exclude": {
+        "**/__pycache__/**": true
+    },
+    "python.testing.pytestArgs": [
+        "-n",
+        "auto",
+        "test"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}
