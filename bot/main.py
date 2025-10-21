@@ -10,7 +10,6 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    InputFile,
     InputMediaPhoto,
 )
 from telegram.error import BadRequest
@@ -549,34 +548,38 @@ async def _send_submission_photos(
     chat_id: int,
     photos: list[Path],
 ) -> None:
-    if not photos:
+    existing_photos = [photo_path for photo_path in photos if photo_path.exists()]
+    if not existing_photos:
         return
 
-    if len(photos) > 1:
+    if len(existing_photos) > 1:
         media_group: list[InputMediaPhoto] = []
         open_files = []
         try:
-            for photo_path in photos:
+            for photo_path in existing_photos:
                 photo_file = photo_path.open("rb")
+                photo_file.seek(0)
                 open_files.append(photo_file)
                 media_group.append(
                     InputMediaPhoto(
-                        media=InputFile(photo_file, filename=photo_path.name)
+                        media=photo_file,
                     )
                 )
             try:
                 await bot.send_media_group(chat_id=chat_id, media=media_group)
+                return
             except BadRequest:
                 logger.exception(
                     "Failed to send media group to chat %s; sending individually",
                     chat_id,
                 )
-                await _send_photos_individually(bot, chat_id, photos)
+                await _send_photos_individually(bot, chat_id, existing_photos)
         finally:
             for photo_file in open_files:
                 photo_file.close()
     else:
-        with photos[0].open("rb") as photo_file:
+        with existing_photos[0].open("rb") as photo_file:
+            photo_file.seek(0)
             await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo_file,
@@ -589,8 +592,16 @@ async def _send_photos_individually(
     photos: list[Path],
 ) -> None:
     for photo_path in photos:
+        if not photo_path.exists():
+            logger.warning(
+                "Skipping missing photo %s when sending to chat %s",
+                photo_path,
+                chat_id,
+            )
+            continue
         try:
             with photo_path.open("rb") as photo_file:
+                photo_file.seek(0)
                 await bot.send_photo(
                     chat_id=chat_id,
                     photo=photo_file,
