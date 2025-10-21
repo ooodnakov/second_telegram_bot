@@ -9,6 +9,7 @@ services:
       - proxy
     volumes:
       - ./:/workspace
+    user: "rem"
     env_file: .env
     deploy:
       resources:
