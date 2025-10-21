@@ -341,37 +341,120 @@ def _fetch_user_submissions(
             value = raw_value.decode() if isinstance(raw_value, bytes) else raw_value
             record[field] = value
 
-        if record.get("user_id") != str(user.id):
+        if record.get("user_id") != str(user_id):
             continue
         submissions.append(record)
 
-    if not submissions:
-        await update.message.reply_text("У вас пока нет отправленных заявок.")
-        return ConversationHandler.END
-
     submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    return submissions
 
-    lines = []
-    for idx, record in enumerate(submissions[:10], start=1):
+
+def _render_applications_page(
+    submissions: list[dict[str, str]],
+    page: int,
+    user_id: int,
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    total = len(submissions)
+    if total == 0:
+        return ("У вас пока нет отправленных заявок.", None)
+
+    total_pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    start_index = page * LIST_PAGE_SIZE
+    end_index = start_index + LIST_PAGE_SIZE
+    page_entries = submissions[start_index:end_index]
+
+    lines: list[str] = []
+    for offset, record in enumerate(page_entries, start=1):
+        ordinal = start_index + offset
         created_at = _format_created_at(record.get("created_at", ""))
         position = record.get("position", "—")
         condition = record.get("condition", "—")
         price = record.get("price", "—")
         contacts = record.get("contacts", "—")
         lines.append(
-            f"{idx}. {position} ({condition}) — {price}\n"
+            f"{ordinal}. {position} ({condition}) — {price}\n"
             f"   Контакты: {contacts}\n"
             f"   Отправлено: {created_at}"
         )
 
-    if len(submissions) > 10:
-        lines.append(
-            f"Показаны последние 10 из {len(submissions)} заявок. "
-            "Уточните у админов для полного списка."
+    header = f"Ваши заявки (страница {page + 1} из {total_pages}, всего {total})"
+    text = "\n\n".join([header, *lines])
+
+    buttons: list[InlineKeyboardButton] = []
+    if page > 0:
+        buttons.append(
+            InlineKeyboardButton("← Назад", callback_data=f"list:{page - 1}:{user_id}")
+        )
+    if page < total_pages - 1:
+        buttons.append(
+            InlineKeyboardButton("Вперёд →", callback_data=f"list:{page + 1}:{user_id}")
         )
 
-    await update.message.reply_text("\n\n".join(lines))
+    keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
+    return text, keyboard
+
+
+async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        return ConversationHandler.END
+
+    submissions = _fetch_user_submissions(context, user.id)
+    if submissions is None:
+        await update.message.reply_text("Хранилище недоступно, попробуйте позже.")
+        return ConversationHandler.END
+    if not submissions:
+        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        return ConversationHandler.END
+
+    context.user_data["list_submissions"] = submissions  # type: ignore
+    text, keyboard = _render_applications_page(submissions, 0, user.id)
+    await update.message.reply_text(text, reply_markup=keyboard)
     return ConversationHandler.END
+
+
+async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query is None:
+        return
+
+    data = query.data or ""
+    try:
+        _, page_raw, user_id_raw = data.split(":", 2)
+        page = int(page_raw)
+        expected_user_id = int(user_id_raw)
+    except (ValueError, AttributeError):
+        await query.answer()
+        logger.warning("Received malformed pagination payload: %s", data)
+        return
+
+    user = query.from_user
+    if user is None or user.id != expected_user_id:
+        await query.answer("Эта навигация недоступна.", show_alert=True)
+        return
+
+    submissions = context.user_data.get("list_submissions")  # type: ignore
+    if not isinstance(submissions, list):
+        submissions = _fetch_user_submissions(context, user.id)
+
+    await query.answer()
+
+    if submissions is None:
+        await query.edit_message_text("Хранилище недоступно, попробуйте позже.")
+        return
+    if not submissions:
+        await query.edit_message_text("У вас пока нет отправленных заявок.")
+        return
+
+    text, keyboard = _render_applications_page(submissions, page, user.id)
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard)
+    except BadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
+        raise
 
 
 async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
