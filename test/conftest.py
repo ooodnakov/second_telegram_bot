@@ -21,7 +21,9 @@ def stub_external_modules() -> Iterator[None]:
         telegram_module.Update = type("Update", (), {})
 
         class _InlineKeyboardButton:
-            def __init__(self, text: str | None = None, callback_data: str | None = None):
+            def __init__(
+                self, text: str | None = None, callback_data: str | None = None
+            ):
                 self.text = text
                 self.callback_data = callback_data
 

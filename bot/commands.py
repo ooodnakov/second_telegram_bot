@@ -186,6 +186,36 @@ def _get_submission_from_state(
     return None
 
 
+def _get_submission_with_cache(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict[str, Any],
+    user_id: int,
+    session_key: str,
+    *,
+    force_refresh: bool = False,
+) -> tuple[dict[str, str] | None, bool]:
+    """Retrieve a submission from cache, optionally refreshing from storage.
+
+    Returns a tuple of ``(submission, storage_error)``.
+    """
+
+    submission = _get_submission_from_state(state, session_key)
+    if submission is not None:
+        return submission, False
+
+    if force_refresh:
+        submissions = fetch_user_submissions(context, user_id)
+        if submissions is None:
+            return None, True
+        _set_list_state_submissions(state, submissions)
+    else:
+        submissions = _ensure_submissions_loaded(context, state, user_id)
+        if submissions is None:
+            return None, True
+
+    return _get_submission_from_state(state, session_key), False
+
+
 def _extract_photo_paths(submission: dict[str, str]) -> list[Path]:
     raw_value = submission.get("photos", "")
     if not raw_value:
@@ -234,9 +264,7 @@ def _format_detail_text(submission: dict[str, str]) -> str:
         ("list.detail_contacts", submission.get("contacts", "")),
     ]
     for key, value in fields:
-        lines.append(
-            get_message(key, value=value or placeholder)
-        )
+        lines.append(get_message(key, value=value or placeholder))
     photos = _extract_photo_paths(submission)
     lines.append(get_message("list.detail_photos", count=len(photos)))
     return "\n".join(lines)
@@ -423,19 +451,13 @@ async def show_application_detail(
     current_page = _clamp_page_index(submissions, page)
     state["page"] = current_page
 
-    submission = _get_submission_from_state(state, session_key)
-    if submission is None:
-        refreshed = fetch_user_submissions(context, user.id)
-        if refreshed is None:
-            await query.answer(
-                get_message("general.storage_unavailable"), show_alert=True
-            )
-            logger.error(
-                "Valkey unavailable when refreshing detail for user {}", user.id
-            )
-            return
-        _set_list_state_submissions(state, refreshed)
-        submission = _get_submission_from_state(state, session_key)
+    submission, storage_error = _get_submission_with_cache(
+        context, state, user.id, session_key, force_refresh=True
+    )
+    if storage_error:
+        await query.answer(get_message("general.storage_unavailable"), show_alert=True)
+        logger.error("Valkey unavailable when refreshing detail for user {}", user.id)
+        return
 
     if submission is None:
         await query.answer(get_message("general.session_missing"), show_alert=True)
@@ -504,24 +526,23 @@ async def refresh_application_detail(
         )
         return
 
-    submission = _get_submission_from_state(state, session_key)
+    submission, storage_error = _get_submission_with_cache(
+        context, state, user_id, session_key
+    )
+    if storage_error:
+        logger.error(
+            "Valkey unavailable when refreshing submission %s for user %s",
+            session_key,
+            user_id,
+        )
+        return
     if submission is None:
-        submissions = _ensure_submissions_loaded(context, state, user_id)
-        if submissions is None:
-            logger.error(
-                "Valkey unavailable when refreshing submission %s for user %s",
-                session_key,
-                user_id,
-            )
-            return
-        submission = _get_submission_from_state(state, session_key)
-        if submission is None:
-            logger.warning(
-                "Submission %s missing from cache during refresh for user %s",
-                session_key,
-                user_id,
-            )
-            return
+        logger.warning(
+            "Submission %s missing from cache during refresh for user %s",
+            session_key,
+            user_id,
+        )
+        return
 
     chat_id = state.get("chat_id")
     message_id = state.get("detail_message_id")
@@ -564,13 +585,12 @@ def get_cached_submission(
     state = _get_or_create_list_state(context)
     if state.get("user_id") != user_id:
         return None
-    submission = _get_submission_from_state(state, session_key)
-    if submission is not None:
-        return submission
-    submissions = _ensure_submissions_loaded(context, state, user_id)
-    if submissions is None:
+    submission, storage_error = _get_submission_with_cache(
+        context, state, user_id, session_key
+    )
+    if storage_error:
         return None
-    return _get_submission_from_state(state, session_key)
+    return submission
 
 
 def update_cached_submission(

@@ -22,7 +22,7 @@ from bot.constants import (
 from bot.logging import logger
 from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.error import BadRequest
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
 EDIT_STATE_KEY = "edit_state"
@@ -112,9 +112,7 @@ async def start_edit_position(
     return EDIT_POSITION
 
 
-async def receive_position(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+async def receive_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     message = update.message
     user = update.effective_user
     if message is None or user is None:
@@ -297,9 +295,7 @@ async def receive_condition_choice(
         _clear_edit_state(context)
         return ConversationHandler.END
 
-    update_cached_submission(
-        context, user_id, session_key, condition=condition_value
-    )
+    update_cached_submission(context, user_id, session_key, condition=condition_value)
     await refresh_application_detail(context, user_id, session_key)
     try:
         await query.edit_message_text(get_message("edit.condition_saved"))
@@ -310,9 +306,7 @@ async def receive_condition_choice(
     return ConversationHandler.END
 
 
-async def start_edit_photos(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+async def start_edit_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
         logger.warning("Photo edit invoked without callback query: %s", update)
@@ -370,9 +364,7 @@ async def receive_photo_upload(
 
     photos: list[Path] = state.setdefault("photos", [])
     if len(photos) >= _MAX_PHOTO_COUNT:
-        await message.reply_text(
-            get_message("edit.photos_limit", keyword=SKIP_KEYWORD)
-        )
+        await message.reply_text(get_message("edit.photos_limit", keyword=SKIP_KEYWORD))
         return EDIT_PHOTOS
 
     session_dir: Path | None = state.get("session_dir")
@@ -392,7 +384,7 @@ async def receive_photo_upload(
         logger.info(
             "User %s uploaded photo %s for session %s", user.id, filename, session_key
         )
-    except Exception:  # pragma: no cover - network related
+    except (TelegramError, OSError):  # pragma: no cover - network/IO related
         logger.exception(
             "Failed to download photo for session %s during edit", session_key
         )
@@ -443,9 +435,7 @@ async def finalize_photo_upload(
     update_cached_submission(
         context, user.id, session_key, photos=",".join(photo_strings)
     )
-    await refresh_application_detail(
-        context, user.id, session_key, send_photos=True
-    )
+    await refresh_application_detail(context, user.id, session_key, send_photos=True)
     await message.reply_text(get_message("edit.photos_saved"))
     logger.info("User %s updated photos for %s", user.id, session_key)
     _clear_edit_state(context)
@@ -457,7 +447,9 @@ async def cancel_editing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if update.message is not None:
         await update.message.reply_text(get_message("edit.cancelled"))
     elif update.callback_query is not None:
-        await update.callback_query.answer(get_message("edit.cancelled"), show_alert=True)
+        await update.callback_query.answer(
+            get_message("edit.cancelled"), show_alert=True
+        )
     return ConversationHandler.END
 
 

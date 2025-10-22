@@ -326,9 +326,7 @@ def update_application_fields(
 
     serialized: dict[str, str] = {}
     for field, value in fields.items():
-        if isinstance(value, (list, tuple, set)):
-            serialized[field] = ",".join(str(item) for item in value)
-        elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
             serialized[field] = ",".join(str(item) for item in value)
         elif value is None:
             serialized[field] = ""

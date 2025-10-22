@@ -2,8 +2,6 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 
 class DummyBot:
     def __init__(self, file_dir: Path) -> None:
@@ -21,7 +19,9 @@ class DummyBot:
         path = Path(getattr(photo, "name", "photo"))
         self.sent_photos.append((chat_id, path))
 
-    async def send_media_group(self, chat_id: int, media: list) -> None:  # pragma: no cover
+    async def send_media_group(
+        self, chat_id: int, media: list
+    ) -> None:  # pragma: no cover
         self.sent_photos.append((chat_id, Path("group")))
 
     async def get_file(self, file_id: str):  # pragma: no cover - network
@@ -157,7 +157,13 @@ def test_paginate_list_updates_message(tmp_path, bot_modules):
             session_dir = tmp_path / "media" / session
             photo_path = session_dir / "photo.jpg"
             _create_submission(
-                client, "testbot", session, 100, session_dir, photo_path, position=f"Item {idx}"
+                client,
+                "testbot",
+                session,
+                100,
+                session_dir,
+                photo_path,
+                position=f"Item {idx}",
             )
 
         message = DummyMessage(chat_id=100)
@@ -190,13 +196,17 @@ def test_show_application_detail_sends_photos(tmp_path, bot_modules):
 
         list_message = DummyMessage(chat_id=100)
         await commands.list_applications(
-            SimpleNamespace(message=list_message, effective_user=SimpleNamespace(id=100)),
+            SimpleNamespace(
+                message=list_message, effective_user=SimpleNamespace(id=100)
+            ),
             context,
         )
 
         callback_message = DummyMessage(chat_id=100, message_id=55)
         query = DummyCallbackQuery("list:view:session:0:100", 100, callback_message)
-        await commands.show_application_detail(SimpleNamespace(callback_query=query), context)
+        await commands.show_application_detail(
+            SimpleNamespace(callback_query=query), context
+        )
 
         assert query.edits
         detail_text, markup = query.edits[0]
@@ -228,7 +238,9 @@ async def _prepare_detail_view(tmp_path, bot_modules):
         ),
         context,
     )
-    detail_query = DummyCallbackQuery("list:view:session:0:100", 100, DummyMessage(100, 5))
+    detail_query = DummyCallbackQuery(
+        "list:view:session:0:100", 100, DummyMessage(100, 5)
+    )
     await commands.show_application_detail(
         SimpleNamespace(callback_query=detail_query), context
     )
@@ -246,7 +258,9 @@ def test_edit_position_updates_record(tmp_path, bot_modules):
             context,
         ) = await _prepare_detail_view(tmp_path, bot_modules)
 
-        start_query = DummyCallbackQuery("edit:position:session", 100, DummyMessage(100))
+        start_query = DummyCallbackQuery(
+            "edit:position:session", 100, DummyMessage(100)
+        )
         state = await editing.start_edit_position(
             SimpleNamespace(callback_query=start_query), context
         )
@@ -255,7 +269,9 @@ def test_edit_position_updates_record(tmp_path, bot_modules):
 
         user_message = DummyUserMessage("Новая позиция")
         result = await editing.receive_position(
-            SimpleNamespace(message=user_message, effective_user=SimpleNamespace(id=100)),
+            SimpleNamespace(
+                message=user_message, effective_user=SimpleNamespace(id=100)
+            ),
             context,
         )
         assert result is commands.ConversationHandler.END
@@ -279,7 +295,9 @@ def test_edit_description_updates_record(tmp_path, bot_modules):
             context,
         ) = await _prepare_detail_view(tmp_path, bot_modules)
 
-        start_query = DummyCallbackQuery("edit:description:session", 100, DummyMessage(100))
+        start_query = DummyCallbackQuery(
+            "edit:description:session", 100, DummyMessage(100)
+        )
         state = await editing.start_edit_description(
             SimpleNamespace(callback_query=start_query), context
         )
@@ -287,7 +305,9 @@ def test_edit_description_updates_record(tmp_path, bot_modules):
 
         user_message = DummyUserMessage("Новое описание")
         result = await editing.receive_description(
-            SimpleNamespace(message=user_message, effective_user=SimpleNamespace(id=100)),
+            SimpleNamespace(
+                message=user_message, effective_user=SimpleNamespace(id=100)
+            ),
             context,
         )
         assert result is commands.ConversationHandler.END
@@ -311,7 +331,9 @@ def test_edit_condition_updates_record(tmp_path, bot_modules):
             context,
         ) = await _prepare_detail_view(tmp_path, bot_modules)
 
-        start_query = DummyCallbackQuery("edit:condition:session", 100, DummyMessage(100))
+        start_query = DummyCallbackQuery(
+            "edit:condition:session", 100, DummyMessage(100)
+        )
         state = await editing.start_edit_condition(
             SimpleNamespace(callback_query=start_query), context
         )
@@ -383,7 +405,9 @@ def test_edit_photos_replaces_media(tmp_path, bot_modules):
         photo_message = DummyUserMessage()
         photo_message.photo = [SimpleNamespace(file_id="file-1")]
         result = await editing.receive_photo_upload(
-            SimpleNamespace(message=photo_message, effective_user=SimpleNamespace(id=100)),
+            SimpleNamespace(
+                message=photo_message, effective_user=SimpleNamespace(id=100)
+            ),
             context,
         )
         assert result == constants.EDIT_PHOTOS
@@ -391,7 +415,9 @@ def test_edit_photos_replaces_media(tmp_path, bot_modules):
 
         skip_message = DummyUserMessage(bot_modules.constants.SKIP_KEYWORD)
         result = await editing.finalize_photo_upload(
-            SimpleNamespace(message=skip_message, effective_user=SimpleNamespace(id=100)),
+            SimpleNamespace(
+                message=skip_message, effective_user=SimpleNamespace(id=100)
+            ),
             context,
         )
         assert result is commands.ConversationHandler.END

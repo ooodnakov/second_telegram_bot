@@ -27,9 +27,32 @@ from bot.commands import (
     list_applications,
     new,
     paginate_list,
-    show_application_detail,
     revoke_application,
+    show_application_detail,
     start,
+)
+from bot.config import create_valkey_client, load_config
+from bot.constants import (
+    ADMIN_ADD_ADMIN_WAIT_ID,
+    ADMIN_BROADCAST_AUDIENCE,
+    ADMIN_BROADCAST_CONFIRM,
+    ADMIN_BROADCAST_DECISION,
+    ADMIN_BROADCAST_MESSAGE,
+    ADMIN_BROADCAST_SCHEDULE_TIME,
+    ADMIN_REMOVE_ADMIN_WAIT_ID,
+    CONDITION,
+    CONTACTS,
+    DESCRIPTION,
+    EDIT_CONDITION,
+    EDIT_DESCRIPTION,
+    EDIT_PHOTOS,
+    EDIT_POSITION,
+    MATERIAL,
+    PHOTOS,
+    POSITION,
+    PRICE,
+    SIZE,
+    SKIP_KEYWORD_PATTERN,
 )
 from bot.editing import (
     cancel_editing,
@@ -42,29 +65,6 @@ from bot.editing import (
     start_edit_description,
     start_edit_photos,
     start_edit_position,
-)
-from bot.config import create_valkey_client, load_config
-from bot.constants import (
-    ADMIN_ADD_ADMIN_WAIT_ID,
-    ADMIN_BROADCAST_AUDIENCE,
-    ADMIN_BROADCAST_CONFIRM,
-    ADMIN_BROADCAST_DECISION,
-    ADMIN_BROADCAST_MESSAGE,
-    ADMIN_BROADCAST_SCHEDULE_TIME,
-    ADMIN_REMOVE_ADMIN_WAIT_ID,
-    EDIT_CONDITION,
-    EDIT_DESCRIPTION,
-    EDIT_PHOTOS,
-    EDIT_POSITION,
-    CONDITION,
-    CONTACTS,
-    DESCRIPTION,
-    MATERIAL,
-    PHOTOS,
-    POSITION,
-    PRICE,
-    SIZE,
-    SKIP_KEYWORD_PATTERN,
 )
 from bot.logging import logger
 from bot.workflow import (
@@ -141,7 +141,9 @@ def main() -> None:
     app.add_handler(CommandHandler("admins", show_admin_roster))
     app.add_handler(CommandHandler("broadcast_history", show_broadcast_history))
     app.add_handler(CommandHandler("scheduled", show_scheduled_broadcasts))
-    app.add_handler(CallbackQueryHandler(show_application_detail, pattern=r"^list:view:"))
+    app.add_handler(
+        CallbackQueryHandler(show_application_detail, pattern=r"^list:view:")
+    )
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:page:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
     app.add_handler(
