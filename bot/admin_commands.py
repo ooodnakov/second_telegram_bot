@@ -362,7 +362,24 @@ async def choose_broadcast_audience(
 
     data["audience"] = audience_key
 
-    await query.edit_message_text(get_message("admin.broadcast_message_prompt"))
+    recipients = recipients_for_audience(context, audience_key)
+    count = len(recipients)
+    data["recipient_count"] = count
+    audience_label = _audience_label(audience_key)
+    data["audience_label"] = audience_label
+
+    if count == 0:
+        await query.edit_message_text(get_message("admin.broadcast_no_recipients"))
+        context.user_data.pop(BROADCAST_DATA_KEY, None)
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        get_message(
+            "admin.broadcast_message_prompt_with_count",
+            audience=audience_label,
+            count=count,
+        )
+    )
     return ADMIN_BROADCAST_MESSAGE
 
 
@@ -379,7 +396,20 @@ async def receive_broadcast_message(
 
     text = (message.text or "").strip()
     if not text:
-        await message.reply_text(get_message("admin.broadcast_message_prompt"))
+        if "recipient_count" in data:
+            audience_label = data.get(
+                "audience_label",
+                _audience_label(data.get("audience", BROADCAST_AUDIENCE_ALL)),
+            )
+            await message.reply_text(
+                get_message(
+                    "admin.broadcast_message_prompt_with_count",
+                    audience=audience_label,
+                    count=data.get("recipient_count", 0),
+                )
+            )
+        else:
+            await message.reply_text(get_message("admin.broadcast_message_prompt"))
         return ADMIN_BROADCAST_MESSAGE
 
     data["text"] = text
