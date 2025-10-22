@@ -3,20 +3,21 @@ from __future__ import annotations
 import importlib
 import sys
 import types
-from contextlib import contextmanager
-from pathlib import Path
-from typing import Any, Iterator
+from types import SimpleNamespace
+from typing import Iterator
 
 import pytest
 from pytest import MonkeyPatch
 
 
-@pytest.fixture(autouse=True, scope="module")
+@pytest.fixture(scope="session")
 def stub_external_modules() -> Iterator[None]:
     monkeypatch = MonkeyPatch()
+
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
         for name in (
+            "Bot",
             "Update",
             "InlineKeyboardButton",
             "InlineKeyboardMarkup",
@@ -27,6 +28,7 @@ def stub_external_modules() -> Iterator[None]:
 
         telegram_error_module = types.ModuleType("telegram.error")
         telegram_error_module.BadRequest = type("BadRequest", (Exception,), {})
+        telegram_error_module.TelegramError = type("TelegramError", (Exception,), {})
         monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
 
     if "telegram.ext" not in sys.modules:
@@ -36,8 +38,8 @@ def stub_external_modules() -> Iterator[None]:
             def token(self, _token: str) -> "_ApplicationBuilder":
                 return self
 
-            def build(self) -> types.SimpleNamespace:
-                return types.SimpleNamespace(
+            def build(self) -> SimpleNamespace:
+                return SimpleNamespace(
                     bot_data={},
                     add_handler=lambda *args, **kwargs: None,
                     add_error_handler=lambda *args, **kwargs: None,
@@ -77,7 +79,7 @@ def stub_external_modules() -> Iterator[None]:
         ext_module.MessageHandler = _DummyHandler
         ext_module.CallbackQueryHandler = _DummyHandler
         ext_module.ConversationHandler = _ConversationHandler
-        ext_module.ContextTypes = types.SimpleNamespace(DEFAULT_TYPE=object())
+        ext_module.ContextTypes = SimpleNamespace(DEFAULT_TYPE=object())
         ext_module.filters = _Filters()
         monkeypatch.setitem(sys.modules, "telegram.ext", ext_module)
 
@@ -111,7 +113,11 @@ def stub_external_modules() -> Iterator[None]:
 
     if "valkey.exceptions" not in sys.modules:
         valkey_exceptions = types.ModuleType("valkey.exceptions")
-        valkey_exceptions.ConnectionError = type("ConnectionError", (Exception,), {})
+        base = type("ValkeyError", (Exception,), {})
+        valkey_exceptions.ValkeyError = base
+        valkey_exceptions.ConnectionError = type("ConnectionError", (base,), {})
+        valkey_exceptions.TimeoutError = type("TimeoutError", (base,), {})
+        valkey_exceptions.ResponseError = type("ResponseError", (base,), {})
         monkeypatch.setitem(sys.modules, "valkey.exceptions", valkey_exceptions)
 
     try:
@@ -121,101 +127,14 @@ def stub_external_modules() -> Iterator[None]:
 
 
 @pytest.fixture(scope="module")
-def bot_main(stub_external_modules: None) -> types.ModuleType:
-    module = importlib.import_module("bot.main")
-    return importlib.reload(module)
-
-
-@contextmanager
-def capture_logs(logger: Any, level: str = "DEBUG") -> Iterator[list[object]]:
-    events: list[object] = []
-
-    def sink(message: object) -> None:
-        events.append(message)
-
-    handler_id = logger.add(sink, level=level)
-    try:
-        yield events
-    finally:
-        logger.remove(handler_id)
-
-
-def extract_messages(events: list[object]) -> list[str]:
-    messages: list[str] = []
-    for event in events:
-        try:
-            # loguru Message objects expose the formatted message via record["message"].
-            record = event.record  # type: ignore[attr-defined]
-            messages.append(str(record["message"]))
-        except AttributeError:
-            messages.append(str(event))
-    return messages
-
-
-def test_load_config_logs_and_parses(
-    tmp_path: Path, bot_main: types.ModuleType
-) -> None:
-    config_path = tmp_path / "config.ini"
-    config_path.write_text(
-        """
-[telegram]
-token = 123456:ABC
-moderator_chat_ids = 123,456
-
-[valkey]
-valkey_host = localhost
-valkey_port = 6379
-valkey_pass = secret
-redis_prefix = demo_prefix
-""".strip()
+def bot_modules(stub_external_modules: None) -> SimpleNamespace:
+    logging_module = importlib.reload(importlib.import_module("bot.logging"))
+    storage_module = importlib.reload(importlib.import_module("bot.storage"))
+    config_module = importlib.reload(importlib.import_module("bot.config"))
+    workflow_module = importlib.reload(importlib.import_module("bot.workflow"))
+    return SimpleNamespace(
+        logging=logging_module,
+        config=config_module,
+        storage=storage_module,
+        workflow=workflow_module,
     )
-
-    with capture_logs(bot_main.logger, level="INFO") as events:
-        config = bot_main.load_config(config_path)
-
-    assert config["token"] == "123456:ABC"
-    assert config["moderator_chat_ids"] == [123, 456]
-    assert config["valkey"]["host"] == "localhost"
-    assert config["valkey"]["port"] == 6379
-    assert config["valkey"]["password"] == "secret"
-    assert config["valkey"]["prefix"] == "demo_prefix"
-
-    messages = extract_messages(events)
-    assert any(
-        "Configuration loaded for 2 moderators" in message for message in messages
-    )
-    assert any("Valkey host localhost:6379" in message for message in messages)
-
-
-def test_application_store_emits_logging(
-    tmp_path: Path, bot_main: types.ModuleType
-) -> None:
-    store = bot_main.ApplicationStore(bot_main.InMemoryValkey(), prefix="test")
-    photo_path = tmp_path / "example.jpg"
-    photo_path.write_text("content", encoding="utf-8")
-
-    initial_data = {
-        "session_key": "session-1",
-        "session_dir": tmp_path,
-        "photos": [],
-    }
-
-    with capture_logs(bot_main.logger, level="DEBUG") as events:
-        store.init_session(42, initial_data)
-        store.set_fields(42, position="Chair")
-        photos = store.append_photo(42, photo_path)
-        assert photo_path in photos
-        session = store.get(42)
-        assert session["position"] == "Chair"
-        assert session["photos"][0] == photo_path
-        store.clear(42)
-
-    messages = extract_messages(events)
-    assert any("Initialized session" in message for message in messages)
-    assert any("Updated session" in message for message in messages)
-    assert any("Appended photo" in message for message in messages)
-    assert any("Loaded session" in message for message in messages)
-    assert any("Cleared session" in message for message in messages)
-
-    # After clearing, ensure the session data is removed.
-    assert store.get(42) == {}
