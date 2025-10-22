@@ -1262,7 +1262,7 @@ def _build_caption(
     if photo_total <= 0:
         photo_info = get_message("admin.photo_missing")
     else:
-        normalized_index = max(0, min(photo_index, photo_total - 1)) + 1
+        normalized_index = photo_index + 1
         photo_info = get_message(
             "admin.photo_counter", current=normalized_index, total=photo_total
         )
@@ -1409,15 +1409,9 @@ def _open_photo_stream(
     photo_paths: Sequence[Path] | None = None,
 ) -> BytesIO | Any:
     paths = (
-        list(photo_paths)
-        if photo_paths is not None
-        else _available_photo_paths(submission)
+        photo_paths if photo_paths is not None else _available_photo_paths(submission)
     )
     if paths:
-        if photo_index < 0:
-            photo_index = 0
-        if photo_index >= len(paths):
-            photo_index = len(paths) - 1
         stream = paths[photo_index].open("rb")
         stream.seek(0)
         return stream
@@ -1543,14 +1537,13 @@ async def _render_admin_application(
     photo_total = len(photo_paths)
     if session_key:
         photo_index = photo_indexes.get(session_key, 0)
+        if photo_total > 0:
+            photo_index %= photo_total
+        else:
+            photo_index = 0
+        photo_indexes[session_key] = photo_index
     else:
         photo_index = 0
-    if photo_total:
-        photo_index %= photo_total
-        if session_key:
-            photo_indexes[session_key] = photo_index
-    elif session_key:
-        photo_indexes[session_key] = 0
 
     caption = _build_caption(state, submission, mode, index, photo_index, photo_total)
     keyboard = _build_keyboard(state, mode, index, submission, photo_index, photo_total)
