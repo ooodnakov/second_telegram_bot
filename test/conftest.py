@@ -17,6 +17,7 @@ def stub_external_modules() -> Iterator[None]:
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
         for name in (
+            "Bot",
             "Update",
             "InlineKeyboardButton",
             "InlineKeyboardMarkup",
@@ -27,6 +28,7 @@ def stub_external_modules() -> Iterator[None]:
 
         telegram_error_module = types.ModuleType("telegram.error")
         telegram_error_module.BadRequest = type("BadRequest", (Exception,), {})
+        telegram_error_module.TelegramError = type("TelegramError", (Exception,), {})
         monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
 
     if "telegram.ext" not in sys.modules:
@@ -111,7 +113,11 @@ def stub_external_modules() -> Iterator[None]:
 
     if "valkey.exceptions" not in sys.modules:
         valkey_exceptions = types.ModuleType("valkey.exceptions")
-        valkey_exceptions.ConnectionError = type("ConnectionError", (Exception,), {})
+        base = type("ValkeyError", (Exception,), {})
+        valkey_exceptions.ValkeyError = base
+        valkey_exceptions.ConnectionError = type("ConnectionError", (base,), {})
+        valkey_exceptions.TimeoutError = type("TimeoutError", (base,), {})
+        valkey_exceptions.ResponseError = type("ResponseError", (base,), {})
         monkeypatch.setitem(sys.modules, "valkey.exceptions", valkey_exceptions)
 
     try:

@@ -17,7 +17,7 @@ moderator_chat_ids = 123,456
 valkey_host = localhost
 valkey_port = 6379
 valkey_pass = secret
-redis_prefix = demo_prefix
+valkey_prefix = demo_prefix
 """.strip()
     )
 

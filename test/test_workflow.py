@@ -100,6 +100,9 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
     record = client.hgetall(f"{prefix}:{session_key}")
     assert record["contacts"] == "@seller"
     assert record["user_id"] == str(user_id)
+    assert f"{prefix}:{session_key}" in client.smembers(
+        f"{prefix}:user:{user_id}:applications"
+    )
     assert f"{prefix}:{session_key}" in client.smembers(f"{prefix}:applications")
     assert client.hgetall(f"{prefix}:session:{user_id}") == {}
 

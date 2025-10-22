@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from bot.logging import logger
 from telegram.ext import ContextTypes
@@ -123,7 +123,7 @@ class ApplicationStore:
                 serialized[field] = str(value)
         return serialized
 
-    def _deserialize(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _deserialize(self, data: Mapping[str | bytes, str | bytes]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for raw_key, raw_value in data.items():
             key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key

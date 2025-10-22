@@ -10,7 +10,15 @@ from typing import Any
 from bot.logging import logger
 from bot.storage import InMemoryValkey
 from valkey import Valkey
-from valkey.exceptions import ConnectionError as ValkeyConnectionError
+from valkey.exceptions import (
+    ConnectionError as ValkeyConnectionError,
+)
+from valkey.exceptions import (
+    ResponseError as ValkeyResponseError,
+)
+from valkey.exceptions import (
+    TimeoutError as ValkeyTimeoutError,
+)
 
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.ini"
 CONFIG_SECTION = "telegram"
@@ -75,7 +83,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     password = parser.get(VALKEY_CONFIG_SECTION, "valkey_pass", fallback="").strip()
     prefix = (
         parser.get(
-            VALKEY_CONFIG_SECTION, "redis_prefix", fallback="telegram_auto_poster"
+            VALKEY_CONFIG_SECTION, "valkey_prefix", fallback="telegram_auto_poster"
         ).strip()
         or "telegram_auto_poster"
     )
@@ -123,6 +131,13 @@ def create_valkey_client(settings: dict[str, Any]) -> Valkey | InMemoryValkey:
             "Valkey connection unavailable ({}). Falling back to in-memory store",
             exc,
         )
+        return InMemoryValkey()
+    except (ValkeyTimeoutError, ValkeyResponseError) as exc:
+        logger.warning(
+            "Valkey ping failed with {}. Falling back to in-memory store",
+            type(exc).__name__,
+        )
+        logger.opt(exception=exc).debug("Valkey ping failure details")
         return InMemoryValkey()
     except Exception:  # noqa: BLE001
         logger.exception("Valkey connection failed. Falling back to in-memory store")

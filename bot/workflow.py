@@ -21,10 +21,17 @@ from bot.constants import (
 from bot.logging import logger
 from bot.messages import get_message
 from bot.storage import get_application_store
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
-from telegram.error import BadRequest
+from telegram import (
+    Bot,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Update,
+)
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 from valkey import Valkey
+from valkey.exceptions import ValkeyError
 
 
 async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,13 +167,14 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(
-        "User {} opted to skip additional photos",
-        getattr(update.effective_user, "id", "unknown"),
-    )
-    await update.message.reply_text(
-        get_message("workflow.size_prompt"), parse_mode="Markdown"
-    )  # type: ignore[arg-type]
+    user = update.effective_user
+    message = update.message
+    if message is None or user is None:
+        logger.warning("skip_photos handler called without message or user: {}", update)
+        return ConversationHandler.END
+
+    logger.info("User {} opted to skip additional photos", user.id)
+    await message.reply_text(get_message("workflow.size_prompt"), parse_mode="Markdown")
     return SIZE
 
 
@@ -299,6 +307,12 @@ async def _send_photo_prompt(
     text: str,
     parse_mode: str | None = None,
 ) -> None:
+    message_update = update.message
+    chat = update.effective_chat
+    if message_update is None or chat is None:
+        logger.warning("Photo prompt requested without message or chat: {}", update)
+        return
+
     previous_message_id = user_data.get("_photo_prompt_message_id")
     if isinstance(previous_message_id, str):
         try:
@@ -309,13 +323,13 @@ async def _send_photo_prompt(
     if previous_message_id:
         try:
             await context.bot.delete_message(
-                chat_id=update.effective_chat.id,  # type: ignore[arg-type]
-                message_id=previous_message_id,  # type: ignore[arg-type]
+                chat_id=chat.id,
+                message_id=previous_message_id,
             )
         except BadRequest:
             pass
 
-    message = await update.message.reply_text(text, parse_mode=parse_mode)  # type: ignore[arg-type]
+    message = await message_update.reply_text(text, parse_mode=parse_mode)
     user_data["_photo_prompt_message_id"] = message.message_id
     user = update.effective_user
     if user is not None:
@@ -347,14 +361,14 @@ async def _forward_to_moderators(
                 parse_mode="Markdown",
             )
             logger.info("Forwarded submission to moderator chat {}", chat_id)
-        except Exception:  # noqa: BLE001
+        except TelegramError:
             logger.exception(
                 "Failed to forward submission to moderator chat {}", chat_id
             )
 
 
 async def _send_submission_photos(
-    bot,
+    bot: Bot,
     chat_id: int,
     photos: list[Path],
 ) -> None:
@@ -405,7 +419,7 @@ async def _send_submission_photos(
 
 
 async def _send_photos_individually(
-    bot,
+    bot: Bot,
     chat_id: int,
     photos: list[Path],
 ) -> None:
@@ -427,7 +441,7 @@ async def _send_photos_individually(
             logger.debug(
                 "Sent fallback individual photo {} to chat {}", photo_path, chat_id
             )
-        except Exception:  # noqa: BLE001
+        except TelegramError:
             logger.exception(
                 "Failed to send individual photo {} to chat {}", photo_path, chat_id
             )
@@ -478,15 +492,18 @@ def _persist_application(
         valkey_key,
     )
 
+    user_applications_key = f"{prefix}:user:{user.id}:applications"
+
     try:
         valkey_client.hset(valkey_key, mapping=record)
+        valkey_client.sadd(user_applications_key, valkey_key)
         valkey_client.sadd(f"{prefix}:applications", valkey_key)
         logger.info(
             "Persisted submission for user {} under key {}",
             user.id,
             valkey_key,
         )
-    except Exception:  # noqa: BLE001
+    except ValkeyError:
         logger.exception("Failed to persist application data to Valkey")
 
 

@@ -9,4 +9,4 @@ token = 1234567890:ABCdefGhIJKlmnoPQRstuVWxyz
 valkey_host = valkey_common
 valkey_port = 6379
 valkey_pass = redis
-redis_prefix = second_hand
+valkey_prefix = second_hand

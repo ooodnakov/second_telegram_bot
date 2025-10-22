@@ -12,6 +12,7 @@ from bot.storage import get_application_store
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
+from valkey.exceptions import ValkeyError
 
 
 async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
@@ -186,24 +187,39 @@ def _fetch_user_submissions(
         return None
 
     prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
-    applications_key = f"{prefix}:applications"
+    user_applications_key = f"{prefix}:user:{user_id}:applications"
+    legacy_applications_key = f"{prefix}:applications"
 
     try:
-        raw_keys = valkey_client.smembers(applications_key)  # type: ignore[attr-defined]
-    except Exception:
-        logger.exception("Failed to fetch application list from Valkey")
+        raw_keys = valkey_client.smembers(user_applications_key)  # type: ignore[attr-defined]
+    except ValkeyError:
+        logger.exception(
+            "Failed to fetch application list for user {} from Valkey",
+            user_id,
+        )
         return None
 
     if not raw_keys:
-        logger.info("No submissions stored for user {}", user_id)
-        return []
+        try:
+            raw_keys = valkey_client.smembers(legacy_applications_key)  # type: ignore[attr-defined]
+        except ValkeyError:
+            logger.exception("Failed to fetch legacy application list from Valkey")
+            return None
+        if not raw_keys:
+            logger.info("No submissions stored for user {}", user_id)
+            return []
+        logger.debug(
+            "Falling back to legacy application set {} for user {}",
+            legacy_applications_key,
+            user_id,
+        )
 
     submissions: list[dict[str, str]] = []
     for raw_key in raw_keys:
         key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
         try:
             raw_data = valkey_client.hgetall(key)
-        except Exception:
+        except ValkeyError:
             logger.exception("Failed to fetch application data for key {}", key)
             continue
         if not raw_data:
