@@ -115,7 +115,7 @@ async def navigate_applications(
         )
         return
 
-    state: dict[str, Any] | None = context.user_data.get(ADMIN_VIEW_STATE_KEY)  # type: ignore[index]
+    state: dict[str, Any] | None = context.user_data.get(ADMIN_VIEW_STATE_KEY)
     if not state:
         await query.answer()
         try:
@@ -349,7 +349,7 @@ async def choose_broadcast_audience(
     """Store the broadcast audience and ask for the message body."""
 
     query = update.callback_query
-    data = context.user_data.get(BROADCAST_DATA_KEY)  # type: ignore[index]
+    data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
         logger.warning("Broadcast audience selection missing context: %s", update)
         return ConversationHandler.END
@@ -372,7 +372,7 @@ async def receive_broadcast_message(
     """Store the broadcast text and show preview controls."""
 
     message = update.message
-    data = context.user_data.get(BROADCAST_DATA_KEY)  # type: ignore[index]
+    data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if message is None or data is None:
         logger.warning("Broadcast message reception missing context: %s", update)
         return ConversationHandler.END
@@ -421,7 +421,7 @@ async def handle_broadcast_decision(
     """Handle send/cancel/schedule decision from admin broadcast flow."""
 
     query = update.callback_query
-    data = context.user_data.get(BROADCAST_DATA_KEY)  # type: ignore[index]
+    data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
         logger.warning("Broadcast decision missing context: %s", update)
         return ConversationHandler.END
@@ -459,7 +459,7 @@ async def receive_broadcast_schedule(
     """Parse the scheduled datetime for the broadcast."""
 
     message = update.message
-    data = context.user_data.get(BROADCAST_DATA_KEY)  # type: ignore[index]
+    data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if message is None or data is None:
         logger.warning("Broadcast schedule input missing context: %s", update)
         return ConversationHandler.END
@@ -541,7 +541,7 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """Finalize broadcast after confirmation."""
 
     query = update.callback_query
-    data = context.user_data.get(BROADCAST_DATA_KEY)  # type: ignore[index]
+    data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
         logger.warning("Broadcast confirmation missing context: %s", update)
         return ConversationHandler.END
@@ -869,12 +869,7 @@ def _build_user_labels(submissions: list[dict[str, str]]) -> dict[str, str]:
             )
         else:
             numbered.append(user_id)
-    unique_numbered = []
-    seen: set[str] = set()
-    for user_id in numbered:
-        if user_id and user_id not in seen:
-            seen.add(user_id)
-            unique_numbered.append(user_id)
+    unique_numbered = list(dict.fromkeys(uid for uid in numbered if uid))
 
     def sort_key(value: str) -> tuple[int, str]:
         try:
@@ -1094,4 +1089,4 @@ async def _render_admin_application(
         try:
             photo_stream.close()
         except Exception:  # noqa: BLE001
-            pass
+            logger.exception("Failed to close photo stream")

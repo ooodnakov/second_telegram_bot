@@ -104,7 +104,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_lines.append(get_message("help.super_admin_remove"))
         text_lines.append(get_message("help.super_admin_list"))
 
-    text = "\n".join(line for line in text_lines if line)
+    text = "\n".join(text_lines).strip()
     await update.message.reply_text(text, parse_mode="Markdown")
     return ConversationHandler.END
 

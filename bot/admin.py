@@ -20,7 +20,7 @@ def _get_prefix(context: Any) -> str:
     return context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
 
 
-def _get_client(context: Any):
+def _get_client(context: Any) -> Any | None:
     return context.application.bot_data.get("valkey_client")
 
 
