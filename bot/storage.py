@@ -21,6 +21,19 @@ class InMemoryValkey:
     def hset(self, name: str, mapping: dict[str, str]) -> None:
         self._hashes.setdefault(name, {}).update(mapping)
 
+    def hdel(self, name: str, *fields: str) -> int:
+        target = self._hashes.get(name)
+        if not target:
+            return 0
+        removed = 0
+        for field in fields:
+            if field in target:
+                del target[field]
+                removed += 1
+        if not target:
+            self._hashes.pop(name, None)
+        return removed
+
     def hgetall(self, name: str) -> dict[str, str]:
         return self._hashes.get(name, {}).copy()
 

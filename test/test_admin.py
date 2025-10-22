@@ -109,6 +109,49 @@ def test_mark_application_revoked_requires_owner(bot_modules) -> None:
     assert "revoked_at" not in record
 
 
+def test_mark_application_reviewed_sets_fields(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    session_key = "session-review"
+    key = f"{prefix}:{session_key}"
+
+    client.hset(
+        key,
+        mapping={"session_key": session_key, "user_id": "7"},
+    )
+
+    timestamp = bot_modules.admin.mark_application_reviewed(context, session_key, 555)
+    assert timestamp is not None
+
+    record = client.hgetall(key)
+    assert record.get("reviewed_by") == "555"
+    assert record.get("reviewed_at") == timestamp
+
+
+def test_clear_application_review_resets_fields(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    session_key = "session-review"
+    key = f"{prefix}:{session_key}"
+
+    client.hset(
+        key,
+        mapping={"session_key": session_key, "user_id": "7"},
+    )
+
+    timestamp = bot_modules.admin.mark_application_reviewed(context, session_key, 777)
+    assert timestamp is not None
+
+    success = bot_modules.admin.clear_application_review(context, session_key)
+    assert success is True
+
+    record = client.hgetall(key)
+    assert "reviewed_at" not in record
+    assert "reviewed_by" not in record
+
+
 def test_show_admin_roster_lists_assignments(bot_modules) -> None:
     admin_commands = bot_modules.admin_commands
     storage = bot_modules.storage
