@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 import importlib
 import sys
 import types
@@ -30,6 +31,14 @@ def stub_external_modules() -> Iterator[None]:
         telegram_error_module.BadRequest = type("BadRequest", (Exception,), {})
         telegram_error_module.TelegramError = type("TelegramError", (Exception,), {})
         monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
+
+        telegram_constants_module = types.ModuleType("telegram.constants")
+        telegram_constants_module.ChatType = enum.Enum(
+            "ChatType", {"PRIVATE": "private", "GROUP": "group"}
+        )
+        monkeypatch.setitem(
+            sys.modules, "telegram.constants", telegram_constants_module
+        )
 
     if "telegram.ext" not in sys.modules:
         ext_module = types.ModuleType("telegram.ext")

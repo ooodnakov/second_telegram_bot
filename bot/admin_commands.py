@@ -39,6 +39,7 @@ from bot.constants import (
 from bot.logging import logger
 from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram.constants import ChatType
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -65,6 +66,67 @@ BROADCAST_RATE_DELAY = 0.1
 _PLACEHOLDER_PHOTO = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
 )
+
+
+async def _resolve_admin_identifier(
+    context: ContextTypes.DEFAULT_TYPE, raw_text: str
+) -> tuple[int | None, str | None, str]:
+    """Resolve an admin identifier provided by a super admin."""
+
+    text = raw_text.strip()
+    if not text:
+        return None, "invalid", text
+
+    numeric_text = text.removeprefix("+")
+    if numeric_text.isdigit():
+        return int(numeric_text), None, numeric_text
+
+    username = text if text.startswith("@") else f"@{text}"
+    bot = getattr(context, "bot", None)
+    if bot is None or not hasattr(bot, "get_chat"):
+        logger.warning("Context bot missing while resolving admin identifier %s", text)
+        return None, "not_found", username
+
+    try:
+        chat = await bot.get_chat(username)
+    except BadRequest as exc:
+        message = (getattr(exc, "message", None) or str(exc) or "").strip()
+        if "chat not found" in message.lower() or "user not found" in message.lower():
+            logger.info("Failed to resolve admin identifier %s: %s", username, message)
+            return None, "not_found", username
+        logger.warning(
+            "Bad request while resolving admin identifier %s: %s", username, message
+        )
+        return None, "lookup_failed", username
+    except TelegramError as exc:  # pragma: no cover - network errors
+        logger.error("Telegram error resolving admin identifier %s: %s", username, exc)
+        return None, "lookup_failed", username
+
+    chat_id = getattr(chat, "id", None)
+    chat_type = getattr(chat, "type", None)
+    if isinstance(chat_type, ChatType):
+        chat_type_str = chat_type.value
+        is_private = chat_type is ChatType.PRIVATE
+    else:
+        chat_type_str = str(chat_type)
+        is_private = chat_type_str.lower() == "private"
+
+    if chat_id is None or not is_private:
+        logger.info(
+            "Resolved identifier %s to unsupported chat %s (type %s)",
+            username,
+            chat_id,
+            chat_type_str,
+        )
+        return None, "not_found", username
+
+    try:
+        return int(chat_id), None, username
+    except (TypeError, ValueError):
+        logger.warning(
+            "Resolved identifier %s with non-integer id %s", username, chat_id
+        )
+        return None, "not_found", username
 
 
 async def view_all_applications(
@@ -216,11 +278,18 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
 
     text = (message.text or "").strip()
-    if not text.isdigit():
-        await message.reply_text(get_message("admin.add_invalid"))
+    new_admin_id, error, identifier = await _resolve_admin_identifier(context, text)
+    if new_admin_id is None:
+        if error == "not_found":
+            await message.reply_text(
+                get_message("admin.user_lookup_failed", identifier=identifier or text)
+            )
+        elif error == "lookup_failed":
+            await message.reply_text(get_message("admin.user_lookup_error"))
+        else:
+            await message.reply_text(get_message("admin.add_invalid"))
         return ADMIN_ADD_ADMIN_WAIT_ID
 
-    new_admin_id = int(text)
     if is_admin(context, new_admin_id):
         await message.reply_text(get_message("admin.add_already", user_id=new_admin_id))
         return ConversationHandler.END
@@ -265,11 +334,18 @@ async def receive_remove_admin_id(
         return ConversationHandler.END
 
     text = (message.text or "").strip()
-    if not text.isdigit():
-        await message.reply_text(get_message("admin.add_invalid"))
+    target_admin_id, error, identifier = await _resolve_admin_identifier(context, text)
+    if target_admin_id is None:
+        if error == "not_found":
+            await message.reply_text(
+                get_message("admin.user_lookup_failed", identifier=identifier or text)
+            )
+        elif error == "lookup_failed":
+            await message.reply_text(get_message("admin.user_lookup_error"))
+        else:
+            await message.reply_text(get_message("admin.add_invalid"))
         return ADMIN_REMOVE_ADMIN_WAIT_ID
 
-    target_admin_id = int(text)
     if is_super_admin(context, target_admin_id):
         await message.reply_text(get_message("admin.remove_super_admin"))
         return ConversationHandler.END
