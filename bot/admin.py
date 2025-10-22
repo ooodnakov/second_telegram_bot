@@ -17,7 +17,7 @@ APPLICATIONS_SET_SUFFIX = "applications"
 
 
 def _get_prefix(context: Any) -> str:
-    return context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
+    return context.application.bot_data.get("valkey_prefix", "second_hand")
 
 
 def _get_client(context: Any) -> Any | None:

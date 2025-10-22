@@ -458,7 +458,7 @@ def _persist_application(
         logger.warning("Valkey client missing; skipping persistence")
         return
 
-    prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
+    prefix = context.application.bot_data.get("valkey_prefix", "second_hand")
     user = update.effective_user
     if user is None:
         logger.warning("Effective user missing; skipping Valkey persistence")

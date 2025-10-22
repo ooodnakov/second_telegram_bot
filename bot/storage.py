@@ -158,7 +158,7 @@ def get_application_store(context: ContextTypes.DEFAULT_TYPE) -> ApplicationStor
     client = context.application.bot_data.get("valkey_client")
     if client is None:
         raise RuntimeError("Valkey client is not configured")
-    prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
+    prefix = context.application.bot_data.get("valkey_prefix", "second_hand")
     return ApplicationStore(client, prefix)
 
 

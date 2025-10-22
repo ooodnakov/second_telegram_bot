@@ -103,9 +103,9 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     password = parser.get(VALKEY_CONFIG_SECTION, "valkey_pass", fallback="").strip()
     prefix = (
         parser.get(
-            VALKEY_CONFIG_SECTION, "valkey_prefix", fallback="telegram_auto_poster"
+            VALKEY_CONFIG_SECTION, "valkey_prefix", fallback="second_hand"
         ).strip()
-        or "telegram_auto_poster"
+        or "second_hand"
     )
 
     logger.info(

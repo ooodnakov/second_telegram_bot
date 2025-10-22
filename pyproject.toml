@@ -66,9 +66,6 @@ exclude = [
     ".vscode",
     "__pypackages__",
     "_build",
-    "telegram_auto_poster/web/templates",
-    "telegram_auto_poster/web/static",
-    "telegram_auto_poster/locales",
 ]
 
 include = ["pyproject.toml", "bot/*", "test/*"]
