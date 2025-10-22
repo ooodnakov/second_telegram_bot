@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import html
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from bot.admin import (
@@ -17,11 +19,13 @@ from bot.constants import LIST_PAGE_SIZE, MEDIA_ROOT, MOSCOW_TZ, POSITION, UTC
 from bot.logging import logger
 from bot.messages import get_message
 from bot.storage import get_application_store
+from bot.workflow import _send_submission_photos
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 REVOKE_CACHE_KEY = "revoke_submissions"
+LIST_STATE_KEY = "list_state"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -123,6 +127,163 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+def _get_or_create_list_state(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> dict[str, Any]:
+    state = context.user_data.get(LIST_STATE_KEY)  # type: ignore[index]
+    if isinstance(state, dict):
+        return state
+    state = {}
+    context.user_data[LIST_STATE_KEY] = state  # type: ignore[index]
+    return state
+
+
+def _set_list_state_submissions(
+    state: dict[str, Any], submissions: list[dict[str, str]]
+) -> dict[str, dict[str, str]]:
+    lookup: dict[str, dict[str, str]] = {}
+    for submission in submissions:
+        session_key = submission.get("session_key")
+        if session_key:
+            lookup[session_key] = submission
+    state["submissions"] = submissions
+    state["lookup"] = lookup
+    return lookup
+
+
+def _ensure_submissions_loaded(
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict[str, Any],
+    user_id: int,
+) -> list[dict[str, str]] | None:
+    submissions = state.get("submissions")
+    if isinstance(submissions, list):
+        return submissions
+    submissions = fetch_user_submissions(context, user_id)
+    if submissions is None:
+        return None
+    _set_list_state_submissions(state, submissions)
+    return submissions
+
+
+def _get_submission_from_state(
+    state: dict[str, Any], session_key: str
+) -> dict[str, str] | None:
+    lookup = state.get("lookup")
+    if isinstance(lookup, dict):
+        submission = lookup.get(session_key)
+        if submission:
+            return submission
+    submissions = state.get("submissions")
+    if isinstance(submissions, list):
+        for submission in submissions:
+            if submission.get("session_key") == session_key:
+                if isinstance(lookup, dict):
+                    lookup[session_key] = submission
+                else:
+                    state["lookup"] = {session_key: submission}
+                return submission
+    return None
+
+
+def _extract_photo_paths(submission: dict[str, str]) -> list[Path]:
+    raw_value = submission.get("photos", "")
+    if not raw_value:
+        return []
+    paths: list[Path] = []
+    for item in raw_value.split(","):
+        stripped = item.strip()
+        if stripped:
+            paths.append(Path(stripped))
+    return paths
+
+
+def _format_detail_status(submission: dict[str, str]) -> str:
+    revoked_at = submission.get("revoked_at", "")
+    if revoked_at:
+        return get_message(
+            "list.detail_status_revoked",
+            revoked_at=_format_created_at(revoked_at),
+        )
+    reviewed_at = submission.get("reviewed_at", "")
+    if reviewed_at:
+        reviewer = submission.get("reviewed_by", "")
+        reviewer_text = reviewer or get_message("general.placeholder")
+        return get_message(
+            "list.detail_status_reviewed",
+            reviewed_at=_format_created_at(reviewed_at),
+            reviewer=reviewer_text,
+        )
+    return get_message("list.detail_status_active")
+
+
+def _format_detail_text(submission: dict[str, str]) -> str:
+    placeholder = get_message("general.placeholder")
+    position = submission.get("position") or placeholder
+    created_at = _format_created_at(submission.get("created_at", ""))
+    lines = [get_message("list.detail_title", position=position)]
+    lines.append(_format_detail_status(submission))
+    lines.append(get_message("list.detail_created", created_at=created_at))
+    lines.append("")
+    fields = [
+        ("list.detail_condition", submission.get("condition", "")),
+        ("list.detail_size", submission.get("size", "")),
+        ("list.detail_material", submission.get("material", "")),
+        ("list.detail_description", submission.get("description", "")),
+        ("list.detail_price", submission.get("price", "")),
+        ("list.detail_contacts", submission.get("contacts", "")),
+    ]
+    for key, value in fields:
+        lines.append(
+            get_message(key, value=value or placeholder)
+        )
+    photos = _extract_photo_paths(submission)
+    lines.append(get_message("list.detail_photos", count=len(photos)))
+    return "\n".join(lines)
+
+
+def _build_detail_keyboard(
+    session_key: str, page: int, user_id: int
+) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(
+                get_message("list.edit_position_button"),
+                callback_data=f"edit:position:{session_key}",
+            ),
+            InlineKeyboardButton(
+                get_message("list.edit_condition_button"),
+                callback_data=f"edit:condition:{session_key}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                get_message("list.edit_description_button"),
+                callback_data=f"edit:description:{session_key}",
+            ),
+            InlineKeyboardButton(
+                get_message("list.edit_photos_button"),
+                callback_data=f"edit:photos:{session_key}",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                get_message("list.back_to_list_button"),
+                callback_data=f"list:page:{page}:{user_id}",
+            )
+        ],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def _clamp_page_index(submissions: list[dict[str, str]], page: int) -> int:
+    if not submissions:
+        return 0
+    total_pages = (len(submissions) + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE
+    total_pages = max(1, total_pages)
+    return max(0, min(page, total_pages - 1))
+
+
 async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display a paginated list of previous submissions."""
 
@@ -141,8 +302,15 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("User {} has no submissions stored", user.id)
         return ConversationHandler.END
 
-    context.user_data["list_submissions"] = submissions  # type: ignore[index]
-    text, keyboard = _render_applications_page(submissions, 0, user.id)
+    context.user_data.pop("list_submissions", None)  # type: ignore[arg-type]
+    state = _get_or_create_list_state(context)
+    _set_list_state_submissions(state, submissions)
+    state["user_id"] = user.id
+    state["page"] = 0
+    state.pop("detail_message_id", None)
+    state.pop("chat_id", None)
+    text, keyboard, current_page = _render_applications_page(submissions, 0, user.id)
+    state["page"] = current_page
     await update.message.reply_text(text, reply_markup=keyboard)
     logger.debug("Displayed submissions page 1 for user {}", user.id)
     return ConversationHandler.END
@@ -158,7 +326,9 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     data = query.data or ""
     try:
-        _, page_raw, user_id_raw = data.split(":", 2)
+        prefix, action, page_raw, user_id_raw = data.split(":", 3)
+        if prefix != "list" or action != "page":
+            raise ValueError("Unexpected prefix")
         page = int(page_raw)
         expected_user_id = int(user_id_raw)
     except (ValueError, AttributeError):
@@ -176,12 +346,11 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    submissions = context.user_data.get("list_submissions")  # type: ignore[index]
-    if not isinstance(submissions, list):
-        submissions = fetch_user_submissions(context, user.id)
-
     await query.answer()
 
+    state = _get_or_create_list_state(context)
+    state["user_id"] = user.id
+    submissions = _ensure_submissions_loaded(context, state, user.id)
     if submissions is None:
         await query.edit_message_text(get_message("general.storage_unavailable"))
         logger.error("Valkey unavailable during pagination for user {}", user.id)
@@ -191,7 +360,8 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.info("User {} has no submissions to paginate", user.id)
         return
 
-    text, keyboard = _render_applications_page(submissions, page, user.id)
+    text, keyboard, current_page = _render_applications_page(submissions, page, user.id)
+    state["page"] = current_page
     try:
         await query.edit_message_text(text, reply_markup=keyboard)
     except BadRequest as exc:
@@ -202,7 +372,220 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
             return
         raise
-    logger.debug("User {} navigated to submissions page {}", user.id, page + 1)
+    logger.debug("User {} navigated to submissions page {}", user.id, current_page + 1)
+
+
+async def show_application_detail(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Render a single submission selected from the list view."""
+
+    query = update.callback_query
+    if query is None:
+        logger.warning("Received detail update without callback query: {}", update)
+        return
+
+    data = query.data or ""
+    try:
+        prefix, action, session_key, page_raw, user_id_raw = data.split(":", 4)
+        if prefix != "list" or action != "view":
+            raise ValueError("Unexpected prefix")
+        page = int(page_raw)
+        expected_user_id = int(user_id_raw)
+    except (ValueError, AttributeError):
+        await query.answer()
+        logger.warning("Received malformed detail payload: {}", data)
+        return
+
+    user = query.from_user
+    if user is None or user.id != expected_user_id:
+        await query.answer(get_message("general.navigation_denied"), show_alert=True)
+        logger.warning(
+            "User {} attempted to view submission {} for user {}",
+            getattr(user, "id", "unknown"),
+            session_key,
+            expected_user_id,
+        )
+        return
+
+    state = _get_or_create_list_state(context)
+    state["user_id"] = user.id
+    submissions = _ensure_submissions_loaded(context, state, user.id)
+    if submissions is None:
+        await query.answer(get_message("general.storage_unavailable"), show_alert=True)
+        logger.error("Valkey unavailable when rendering detail for user {}", user.id)
+        return
+    if not submissions:
+        await query.edit_message_text(get_message("general.no_submissions"))
+        logger.info("User {} has no submissions to display", user.id)
+        return
+
+    current_page = _clamp_page_index(submissions, page)
+    state["page"] = current_page
+
+    submission = _get_submission_from_state(state, session_key)
+    if submission is None:
+        refreshed = fetch_user_submissions(context, user.id)
+        if refreshed is None:
+            await query.answer(
+                get_message("general.storage_unavailable"), show_alert=True
+            )
+            logger.error(
+                "Valkey unavailable when refreshing detail for user {}", user.id
+            )
+            return
+        _set_list_state_submissions(state, refreshed)
+        submission = _get_submission_from_state(state, session_key)
+
+    if submission is None:
+        await query.answer(get_message("general.session_missing"), show_alert=True)
+        logger.warning(
+            "Submission %s not found for detail view by user %s",
+            session_key,
+            user.id,
+        )
+        return
+
+    if submission.get("user_id") != str(user.id):
+        await query.answer(get_message("general.navigation_denied"), show_alert=True)
+        logger.warning(
+            "User %s attempted to view submission %s owned by %s",
+            user.id,
+            session_key,
+            submission.get("user_id"),
+        )
+        return
+
+    await query.answer()
+
+    text = _format_detail_text(submission)
+    keyboard = _build_detail_keyboard(session_key, current_page, user.id)
+    message = query.message
+    try:
+        await query.edit_message_text(text, reply_markup=keyboard)
+    except BadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+    if message is not None:
+        state["detail_message_id"] = message.message_id
+        try:
+            state["chat_id"] = message.chat_id  # type: ignore[attr-defined]
+        except AttributeError:
+            chat = getattr(message, "chat", None)
+            if chat is not None:
+                state["chat_id"] = getattr(chat, "id", None)
+    state["current_session_key"] = session_key
+
+    photos = _extract_photo_paths(submission)
+    chat_id = state.get("chat_id")
+    if photos and isinstance(chat_id, int):
+        await _send_submission_photos(context.bot, chat_id, photos)
+
+    logger.debug(
+        "Displayed submission %s details for user %s",
+        session_key,
+        user.id,
+    )
+
+
+async def refresh_application_detail(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    session_key: str,
+    *,
+    send_photos: bool = False,
+) -> None:
+    """Re-render the detail view after an edit operation."""
+
+    state = _get_or_create_list_state(context)
+    if state.get("user_id") != user_id:
+        logger.debug(
+            "Skipping detail refresh for user %s due to missing state", user_id
+        )
+        return
+
+    submission = _get_submission_from_state(state, session_key)
+    if submission is None:
+        submissions = _ensure_submissions_loaded(context, state, user_id)
+        if submissions is None:
+            logger.error(
+                "Valkey unavailable when refreshing submission %s for user %s",
+                session_key,
+                user_id,
+            )
+            return
+        submission = _get_submission_from_state(state, session_key)
+        if submission is None:
+            logger.warning(
+                "Submission %s missing from cache during refresh for user %s",
+                session_key,
+                user_id,
+            )
+            return
+
+    chat_id = state.get("chat_id")
+    message_id = state.get("detail_message_id")
+    if not isinstance(chat_id, int) or not isinstance(message_id, int):
+        logger.debug(
+            "Detail refresh skipped for user %s due to missing message context",
+            user_id,
+        )
+        return
+
+    page = state.get("page", 0)
+    text = _format_detail_text(submission)
+    keyboard = _build_detail_keyboard(session_key, page, user_id)
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=keyboard,
+        )
+    except BadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+
+    state["current_session_key"] = session_key
+
+    if send_photos:
+        photos = _extract_photo_paths(submission)
+        if photos:
+            await _send_submission_photos(context.bot, chat_id, photos)
+
+
+def get_cached_submission(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    session_key: str,
+) -> dict[str, str] | None:
+    """Return a cached submission for editing flows if available."""
+
+    state = _get_or_create_list_state(context)
+    if state.get("user_id") != user_id:
+        return None
+    submission = _get_submission_from_state(state, session_key)
+    if submission is not None:
+        return submission
+    submissions = _ensure_submissions_loaded(context, state, user_id)
+    if submissions is None:
+        return None
+    return _get_submission_from_state(state, session_key)
+
+
+def update_cached_submission(
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    session_key: str,
+    **fields: str,
+) -> None:
+    """Apply updated fields to the cached submission data."""
+
+    submission = get_cached_submission(context, user_id, session_key)
+    if submission is None:
+        return
+    for field, value in fields.items():
+        submission[field] = value
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -218,60 +601,70 @@ def _render_applications_page(
     submissions: list[dict[str, str]],
     page: int,
     user_id: int,
-) -> tuple[str, InlineKeyboardMarkup | None]:
+) -> tuple[str, InlineKeyboardMarkup | None, int]:
     total = len(submissions)
     if total == 0:
-        return get_message("general.no_submissions"), None
+        return get_message("general.no_submissions"), None, 0
 
-    start_index = page * LIST_PAGE_SIZE
+    current_page = _clamp_page_index(submissions, page)
+    start_index = current_page * LIST_PAGE_SIZE
     end_index = start_index + LIST_PAGE_SIZE
     page_items = submissions[start_index:end_index]
 
-    lines = [get_message("list.title")]
+    keyboard_rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    placeholder = get_message("general.placeholder")
     for index, submission in enumerate(page_items, start=start_index + 1):
-        lines.append(
-            get_message(
-                "list.entry_format",
-                index=index,
-                position=submission.get("position", get_message("general.placeholder")),
-                created_at=_format_created_at(submission.get("created_at", "")),
-                status=_format_submission_status(submission),
+        session_key = submission.get("session_key")
+        if not session_key:
+            continue
+        position = submission.get("position", placeholder) or placeholder
+        row.append(
+            InlineKeyboardButton(
+                get_message("list.entry_button", index=index, position=position),
+                callback_data=f"list:view:{session_key}:{current_page}:{user_id}",
             )
         )
-    text = "\n".join(lines)
+        if len(row) == 2:
+            keyboard_rows.append(row)
+            row = []
+    if row:
+        keyboard_rows.append(row)
 
     total_pages = (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE
-    if total_pages <= 1:
-        return text, None
-
-    prev_page = max(0, page - 1)
-    next_page = min(total_pages - 1, page + 1)
-    keyboard: list[list[InlineKeyboardButton]] = []
-
-    row: list[InlineKeyboardButton] = []
-    if page > 0:
-        row.append(
+    if total_pages > 1:
+        controls: list[InlineKeyboardButton] = []
+        if current_page > 0:
+            controls.append(
+                InlineKeyboardButton(
+                    get_message("list.back_button"),
+                    callback_data=f"list:page:{current_page - 1}:{user_id}",
+                )
+            )
+        controls.append(
             InlineKeyboardButton(
-                "«",
-                callback_data=f"list:{prev_page}:{user_id}",
+                get_message(
+                    "list.page_indicator",
+                    current=current_page + 1,
+                    total=total_pages,
+                ),
+                callback_data=f"list:page:{current_page}:{user_id}",
             )
         )
-    row.append(
-        InlineKeyboardButton(
-            get_message("list.page_indicator", current=page + 1, total=total_pages),
-            callback_data=f"list:{page}:{user_id}",
-        )
-    )
-    if page < total_pages - 1:
-        row.append(
-            InlineKeyboardButton(
-                "»",
-                callback_data=f"list:{next_page}:{user_id}",
+        if current_page < total_pages - 1:
+            controls.append(
+                InlineKeyboardButton(
+                    get_message("list.forward_button"),
+                    callback_data=f"list:page:{current_page + 1}:{user_id}",
+                )
             )
-        )
+        keyboard_rows.append(controls)
 
-    keyboard.append(row)
-    return text, InlineKeyboardMarkup(keyboard)
+    if not keyboard_rows:
+        return get_message("general.no_submissions"), None, current_page
+
+    text = get_message("list.instructions")
+    return text, InlineKeyboardMarkup(keyboard_rows), current_page
 
 
 def _format_created_at(value: str) -> str:
@@ -499,7 +892,11 @@ __all__ = [
     "list_applications",
     "new",
     "paginate_list",
+    "refresh_application_detail",
     "revoke_application",
     "handle_revoke_callback",
+    "get_cached_submission",
+    "update_cached_submission",
+    "show_application_detail",
     "start",
 ]

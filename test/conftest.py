@@ -17,14 +17,25 @@ def stub_external_modules() -> Iterator[None]:
 
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
-        for name in (
-            "Bot",
-            "Update",
-            "InlineKeyboardButton",
-            "InlineKeyboardMarkup",
-            "InputMediaPhoto",
-        ):
-            setattr(telegram_module, name, type(name, (), {}))
+        telegram_module.Bot = type("Bot", (), {})
+        telegram_module.Update = type("Update", (), {})
+
+        class _InlineKeyboardButton:
+            def __init__(self, text: str | None = None, callback_data: str | None = None):
+                self.text = text
+                self.callback_data = callback_data
+
+        class _InlineKeyboardMarkup:
+            def __init__(self, inline_keyboard: list[list[object]] | None = None):
+                self.inline_keyboard = inline_keyboard or []
+
+        class _InputMediaPhoto:
+            def __init__(self, media: object | None = None):
+                self.media = media
+
+        telegram_module.InlineKeyboardButton = _InlineKeyboardButton
+        telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
+        telegram_module.InputMediaPhoto = _InputMediaPhoto
         monkeypatch.setitem(sys.modules, "telegram", telegram_module)
 
         telegram_error_module = types.ModuleType("telegram.error")
@@ -145,7 +156,9 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
     admin_commands_module = importlib.reload(
         importlib.import_module("bot.admin_commands")
     )
+    editing_module = importlib.reload(importlib.import_module("bot.editing"))
     constants_module = importlib.reload(importlib.import_module("bot.constants"))
+    commands_module = importlib.reload(importlib.import_module("bot.commands"))
     return SimpleNamespace(
         logging=logging_module,
         config=config_module,
@@ -153,5 +166,7 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
         workflow=workflow_module,
         admin=admin_module,
         admin_commands=admin_commands_module,
+        editing=editing_module,
         constants=constants_module,
+        commands=commands_module,
     )
