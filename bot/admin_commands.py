@@ -8,7 +8,7 @@ import html
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 from uuid import uuid4
 
 from bot.admin import (
@@ -313,6 +313,90 @@ async def navigate_applications(
         return
 
     await query.answer()
+
+
+async def navigate_application_photo_prev(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Show the previous photo for the current submission."""
+
+    await _navigate_application_photo(update, context, -1)
+
+
+async def navigate_application_photo_next(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Show the next photo for the current submission."""
+
+    await _navigate_application_photo(update, context, 1)
+
+
+async def _navigate_application_photo(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, direction: int
+) -> None:
+    query = update.callback_query
+    if query is None:
+        logger.warning(
+            "Received admin photo navigation update without callback query: %s",
+            update,
+        )
+        return
+
+    state: dict[str, Any] | None = context.user_data.get(ADMIN_VIEW_STATE_KEY)
+    if not state:
+        await query.answer()
+        logger.warning(
+            "Photo navigation requested without view state by user %s",
+            getattr(query.from_user, "id", "unknown"),
+        )
+        return
+
+    data = (query.data or "").split(":", 1)
+    if len(data) != 2:
+        await query.answer()
+        return
+
+    session_key = data[1]
+    if not session_key:
+        await query.answer()
+        return
+
+    submission = _find_submission(state, session_key)
+    if submission is None:
+        await query.answer(get_message("admin.review_missing"), show_alert=True)
+        logger.warning(
+            "Photo navigation requested for unknown session %s",
+            session_key,
+        )
+        return
+
+    photo_paths = _available_photo_paths(submission)
+    total = len(photo_paths)
+    if total <= 1:
+        await query.answer()
+        return
+
+    photo_indexes = state.setdefault("photo_indexes", {})
+    current_index = photo_indexes.get(session_key, 0) % total
+    new_index = (current_index + direction) % total
+    photo_indexes[session_key] = new_index
+
+    mode = state.get("mode", "time")
+    submissions = state.get("ordered", {}).get(mode, [])
+    indexes = state.setdefault("indexes", {})
+    if isinstance(submissions, list):
+        for idx, candidate in enumerate(submissions):
+            if (
+                isinstance(candidate, dict)
+                and candidate.get("session_key") == session_key
+            ):
+                indexes[mode] = idx
+                break
+
+    state["current_session_key"] = session_key
+
+    await query.answer()
+    await _render_admin_application(context, state)
 
 
 async def start_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1045,6 +1129,8 @@ def _build_view_state(submissions: list[dict[str, str]]) -> dict[str, Any]:
         "empty_message_id": None,
         "filter_hide_reviewed": False,
         "lookup": lookup,
+        "photo_indexes": {},
+        "current_session_key": None,
     }
     _apply_filter(state)
     return state
@@ -1153,7 +1239,12 @@ def _format_timestamp(value: str) -> str:
 
 
 def _build_caption(
-    state: dict[str, Any], submission: dict[str, str], mode: str, index: int
+    state: dict[str, Any],
+    submission: dict[str, str],
+    mode: str,
+    index: int,
+    photo_index: int,
+    photo_total: int,
 ) -> str:
     total = len(state["ordered"].get(mode, []))
     mode_label = (
@@ -1168,8 +1259,13 @@ def _build_caption(
     def field(name: str) -> str:
         return submission.get(name, "") or get_message("general.placeholder")
 
-    photo_count = sum(1 for path in _photo_paths(submission) if path.exists())
-    photo_info = str(photo_count) if photo_count else get_message("admin.photo_missing")
+    if photo_total <= 0:
+        photo_info = get_message("admin.photo_missing")
+    else:
+        normalized_index = photo_index + 1
+        photo_info = get_message(
+            "admin.photo_counter", current=normalized_index, total=photo_total
+        )
 
     revoked_at = submission.get("revoked_at", "")
     if revoked_at:
@@ -1215,6 +1311,8 @@ def _build_keyboard(
     mode: str,
     index: int,
     submission: dict[str, str] | None,
+    _photo_index: int = 0,
+    photo_total: int = 0,
 ) -> InlineKeyboardMarkup:
     submissions = state.get("ordered", {}).get(mode, [])
     total = len(submissions)
@@ -1251,6 +1349,19 @@ def _build_keyboard(
                     )
                 ]
             )
+            if photo_total > 1:
+                buttons.append(
+                    [
+                        InlineKeyboardButton(
+                            get_message("admin.photo_prev_button"),
+                            callback_data=f"admin_app_photo_prev:{session_key}",
+                        ),
+                        InlineKeyboardButton(
+                            get_message("admin.photo_next_button"),
+                            callback_data=f"admin_app_photo_next:{session_key}",
+                        ),
+                    ]
+                )
 
     filter_text = get_message("admin.filter_hide_reviewed")
     if state.get("filter_hide_reviewed"):
@@ -1288,12 +1399,22 @@ def _photo_paths(submission: dict[str, str]) -> list[Path]:
     return paths
 
 
-def _open_photo_stream(submission: dict[str, str]) -> BytesIO | Any:
-    for path in _photo_paths(submission):
-        if path.exists():
-            stream = path.open("rb")
-            stream.seek(0)
-            return stream
+def _available_photo_paths(submission: dict[str, str]) -> list[Path]:
+    return [path for path in _photo_paths(submission) if path.exists()]
+
+
+def _open_photo_stream(
+    submission: dict[str, str],
+    photo_index: int = 0,
+    photo_paths: Sequence[Path] | None = None,
+) -> BytesIO | Any:
+    paths = (
+        photo_paths if photo_paths is not None else _available_photo_paths(submission)
+    )
+    if paths:
+        stream = paths[photo_index].open("rb")
+        stream.seek(0)
+        return stream
     placeholder = BytesIO(_PLACEHOLDER_PHOTO)
     placeholder.name = "placeholder.png"  # type: ignore[attr-defined]
     placeholder.seek(0)
@@ -1336,6 +1457,8 @@ __all__ = [
     "view_all_applications",
     "choose_broadcast_audience",
     "handle_broadcast_decision",
+    "navigate_application_photo_next",
+    "navigate_application_photo_prev",
 ]
 
 
@@ -1355,6 +1478,7 @@ async def _render_admin_application(
     if not submissions:
         keyboard = _build_keyboard(state, mode, 0, None)
         text = get_message("admin.no_filtered_applications")
+        state["current_session_key"] = None
         if message_id:
             try:
                 await context.bot.delete_message(
@@ -1401,8 +1525,28 @@ async def _render_admin_application(
     indexes[mode] = index
     submission = submissions[index]
 
-    caption = _build_caption(state, submission, mode, index)
-    keyboard = _build_keyboard(state, mode, index, submission)
+    session_key = str(submission.get("session_key", ""))
+    previous_session_key = state.get("current_session_key")
+    state["current_session_key"] = session_key or None
+    photo_indexes = state.setdefault("photo_indexes", {})
+    if session_key and (
+        session_key not in photo_indexes or session_key != previous_session_key
+    ):
+        photo_indexes[session_key] = 0
+    photo_paths = _available_photo_paths(submission)
+    photo_total = len(photo_paths)
+    if session_key:
+        photo_index = photo_indexes.get(session_key, 0)
+        if photo_total > 0:
+            photo_index %= photo_total
+        else:
+            photo_index = 0
+        photo_indexes[session_key] = photo_index
+    else:
+        photo_index = 0
+
+    caption = _build_caption(state, submission, mode, index, photo_index, photo_total)
+    keyboard = _build_keyboard(state, mode, index, submission, photo_index, photo_total)
     if empty_message_id:
         try:
             await context.bot.delete_message(
@@ -1416,7 +1560,7 @@ async def _render_admin_application(
                 )
         state["empty_message_id"] = None
 
-    photo_stream = _open_photo_stream(submission)
+    photo_stream = _open_photo_stream(submission, photo_index, photo_paths)
     try:
         if message_id:
             media = InputMediaPhoto(
