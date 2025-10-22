@@ -132,9 +132,17 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
     storage_module = importlib.reload(importlib.import_module("bot.storage"))
     config_module = importlib.reload(importlib.import_module("bot.config"))
     workflow_module = importlib.reload(importlib.import_module("bot.workflow"))
+    admin_module = importlib.reload(importlib.import_module("bot.admin"))
+    admin_commands_module = importlib.reload(
+        importlib.import_module("bot.admin_commands")
+    )
+    constants_module = importlib.reload(importlib.import_module("bot.constants"))
     return SimpleNamespace(
         logging=logging_module,
         config=config_module,
         storage=storage_module,
         workflow=workflow_module,
+        admin=admin_module,
+        admin_commands=admin_commands_module,
+        constants=constants_module,
     )
