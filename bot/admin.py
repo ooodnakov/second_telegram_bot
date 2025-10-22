@@ -352,9 +352,10 @@ def clear_application_review(context: Any, session_key: str) -> bool:
         return False
 
     try:
-        client.hset(  # type: ignore[attr-defined]
+        client.hdel(  # type: ignore[attr-defined]
             key,
-            mapping={"reviewed_at": "", "reviewed_by": ""},
+            "reviewed_at",
+            "reviewed_by",
         )
     except ValkeyError:
         logger.exception("Failed to clear review flag for application %s", key)

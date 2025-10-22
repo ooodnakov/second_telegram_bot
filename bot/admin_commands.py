@@ -285,8 +285,8 @@ async def navigate_applications(
                     get_message("admin.review_clear_failed"), show_alert=True
                 )
                 return
-            submission["reviewed_at"] = ""
-            submission["reviewed_by"] = ""
+            submission.pop("reviewed_at", None)
+            submission.pop("reviewed_by", None)
             message_key = "admin.review_cleared"
         else:
             await query.answer()
@@ -1042,6 +1042,7 @@ def _build_view_state(submissions: list[dict[str, str]]) -> dict[str, Any]:
         "indexes": {"time": 0, "user": 0},
         "labels": labels,
         "message_id": None,
+        "empty_message_id": None,
         "filter_hide_reviewed": False,
         "lookup": lookup,
     }
@@ -1348,28 +1349,50 @@ async def _render_admin_application(
         logger.error("Admin view state missing chat_id")
         return
 
+    message_id = state.get("message_id")
+    empty_message_id = state.get("empty_message_id")
+
     if not submissions:
         keyboard = _build_keyboard(state, mode, 0, None)
         text = get_message("admin.no_filtered_applications")
-        message_id = state.get("message_id")
         if message_id:
             try:
-                await context.bot.edit_message_caption(
+                await context.bot.delete_message(
                     chat_id=chat_id,
                     message_id=message_id,
-                    caption=text,
+                )
+            except TelegramError as exc:  # pragma: no cover - network errors
+                if "message to delete not found" not in str(exc).lower():
+                    logger.exception(
+                        "Failed to delete application photo message %s", message_id
+                    )
+            state["message_id"] = None
+
+        if empty_message_id:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=empty_message_id,
+                    text=text,
                     reply_markup=keyboard,
                 )
             except BadRequest as exc:
-                if "message is not modified" in str(exc).lower():
+                lowered = str(exc).lower()
+                if "message is not modified" in lowered:
                     return
-                raise
-        else:
-            await context.bot.send_message(
+                if "message to edit not found" in lowered:
+                    empty_message_id = None
+                    state["empty_message_id"] = None
+                else:
+                    raise
+
+        if not empty_message_id:
+            sent = await context.bot.send_message(
                 chat_id=chat_id,
                 text=text,
                 reply_markup=keyboard,
             )
+            state["empty_message_id"] = sent.message_id
         return
 
     indexes = state.setdefault("indexes", {})
@@ -1380,7 +1403,19 @@ async def _render_admin_application(
 
     caption = _build_caption(state, submission, mode, index)
     keyboard = _build_keyboard(state, mode, index, submission)
-    message_id = state.get("message_id")
+    if empty_message_id:
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=empty_message_id,
+            )
+        except TelegramError as exc:  # pragma: no cover - network errors
+            if "message to delete not found" not in str(exc).lower():
+                logger.exception(
+                    "Failed to delete empty state message %s", empty_message_id
+                )
+        state["empty_message_id"] = None
+
     photo_stream = _open_photo_stream(submission)
     try:
         if message_id:

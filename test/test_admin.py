@@ -148,8 +148,8 @@ def test_clear_application_review_resets_fields(bot_modules) -> None:
     assert success is True
 
     record = client.hgetall(key)
-    assert record.get("reviewed_at") == ""
-    assert record.get("reviewed_by") == ""
+    assert "reviewed_at" not in record
+    assert "reviewed_by" not in record
 
 
 def test_show_admin_roster_lists_assignments(bot_modules) -> None:
