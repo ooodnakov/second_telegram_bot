@@ -1,0 +1,41 @@
+[general]
+storage_unavailable = "Хранилище недоступно, попробуйте позже."
+storage_unavailable_support = "Хранилище недоступно, попробуйте позже или обратитесь к администратору."
+no_submissions = "У вас пока нет отправленных заявок."
+session_missing = "Сессия не найдена, отправьте /new"
+photo_required = "Пожалуйста, отправьте фото позиции"
+photo_save_error = "Ошибка сохранения фото, отправьте /new"
+submission_success = "Заявка успешно отправлена! Спасибо."
+submission_cancelled = "Заявка отменена"
+navigation_denied = "Эта навигация недоступна."
+placeholder = "—"
+
+[start]
+greeting = "Привет! Добро пожаловать."
+new_instruction = "Чтобы отправить новую заявку, используйте команду /new."
+
+[help]
+text = "Доступные команды:\n/start — приветствие и краткая инструкция.\n/new — отправить новую заявку.\n/list — показать отправленные заявки.\n/cancel — отменить текущую заявку."
+
+[list]
+header = "Ваши заявки (страница {page} из {total_pages}, всего {total})"
+entry = "{ordinal}. {position} ({condition}) — {price}\n   Контакты: {contacts}\n   Отправлено: {created_at}"
+back_button = "← Назад"
+forward_button = "Вперёд →"
+
+[workflow]
+position_prompt = "Введите *название позиции:*"
+condition_prompt = "Выберите состояние:"
+condition_used = "Б/У"
+condition_new = "Новое"
+photos_initial_prompt = "Отправьте 2–5 фото позиции"
+photos_additional_required = "Фото получено. Ещё минимум одно фото."
+photos_additional_optional = "Получено {count} фото. Если хотите добавить ещё — пришлите. Когда хватит, напишите '{keyword}'."
+photos_max_prompt = "Максимум 5 фото получено. Теперь введите *размер:*"
+skip_keyword = "далее"
+size_prompt = "Введите *размер:*"
+material_prompt = "Введите *материал:*"
+description_prompt = "Введите *короткое описание:*"
+price_prompt = "Введите *цену:*"
+contacts_prompt = "Теперь оставьте ваши контакты (телефон, @username и т.д.)"
+summary_template = "*Новая заявка:*\n\nПозиция: {position}\nСостояние: {condition}\nРазмер: {size}\nМатериал: {material}\nОписание: {description}\nЦена: {price}\nКонтакты: {contacts}"
