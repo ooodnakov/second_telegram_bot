@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from configparser import ConfigParser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ except ImportError:  # pragma: no cover - python <3.11 fallback
     UTC = timezone.utc  # type: ignore[assignment]
 
 from bot.logger_setup import setup_logger
+from bot.messages import get_message
 
 try:
     from zoneinfo import ZoneInfoNotFoundError
@@ -38,6 +40,8 @@ from valkey import Valkey
 from valkey.exceptions import ConnectionError as ValkeyConnectionError
 
 LIST_PAGE_SIZE = 5
+SKIP_KEYWORD = get_message("workflow.skip_keyword")
+SKIP_KEYWORD_PATTERN = rf"(?i)^{re.escape(SKIP_KEYWORD)}$"
 try:
     MOSCOW_TZ = ZoneInfo("Europe/Moscow")
     _MOSCOW_TZ_FALLBACK = False
@@ -308,10 +312,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} invoked /start", user.id)
-    await update.message.reply_text("Привет! Добро пожаловать.")
-    await update.message.reply_text(
-        "Чтобы отправить новую заявку, используйте команду /new."
-    )
+    await update.message.reply_text(get_message("start.greeting"))
+    await update.message.reply_text(get_message("start.new_instruction"))
     return ConversationHandler.END
 
 
@@ -326,11 +328,11 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except RuntimeError as exc:
         logger.exception("Failed to obtain application store for user %s", user.id)
         await update.message.reply_text(
-            "Хранилище недоступно, попробуйте позже или обратитесь к администратору."
+            get_message("general.storage_unavailable_support")
         )
         return ConversationHandler.END
     await update.message.reply_text(
-        "Введите *название позиции:*",
+        get_message("workflow.position_prompt"),
         parse_mode="Markdown",
     )
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
@@ -360,19 +362,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} requested help", user.id)
-    await update.message.reply_text(
-        "Доступные команды:\n"
-        "/start — приветствие и краткая инструкция.\n"
-        "/new — отправить новую заявку.\n"
-        "/list — показать отправленные заявки.\n"
-        "/cancel — отменить текущую заявку.",
-    )
+    await update.message.reply_text(get_message("help.text"))
     return ConversationHandler.END
 
 
 def _format_created_at(value: str) -> str:
     if not value:
-        return "—"
+        return get_message("general.placeholder")
     try:
         timestamp = datetime.fromisoformat(value)
         if timestamp.tzinfo is None:
@@ -445,7 +441,7 @@ def _render_applications_page(
     total = len(submissions)
     if total == 0:
         logger.debug("Rendering empty applications page for user {}", user_id)
-        return ("У вас пока нет отправленных заявок.", None)
+        return (get_message("general.no_submissions"), None)
 
     total_pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -455,30 +451,48 @@ def _render_applications_page(
     page_entries = submissions[start_index:end_index]
 
     lines: list[str] = []
+    placeholder = get_message("general.placeholder")
     for offset, record in enumerate(page_entries, start=1):
         ordinal = start_index + offset
         created_at = _format_created_at(record.get("created_at", ""))
-        position = record.get("position", "—")
-        condition = record.get("condition", "—")
-        price = record.get("price", "—")
-        contacts = record.get("contacts", "—")
+        position = record.get("position") or placeholder
+        condition = record.get("condition") or placeholder
+        price = record.get("price") or placeholder
+        contacts = record.get("contacts") or placeholder
         lines.append(
-            f"{ordinal}. {position} ({condition}) — {price}\n"
-            f"   Контакты: {contacts}\n"
-            f"   Отправлено: {created_at}"
+            get_message(
+                "list.entry",
+                ordinal=ordinal,
+                position=position,
+                condition=condition,
+                price=price,
+                contacts=contacts,
+                created_at=created_at,
+            )
         )
 
-    header = f"Ваши заявки (страница {page + 1} из {total_pages}, всего {total})"
+    header = get_message(
+        "list.header",
+        page=page + 1,
+        total_pages=total_pages,
+        total=total,
+    )
     text = "\n\n".join([header, *lines])
 
     buttons: list[InlineKeyboardButton] = []
     if page > 0:
         buttons.append(
-            InlineKeyboardButton("← Назад", callback_data=f"list:{page - 1}:{user_id}")
+            InlineKeyboardButton(
+                get_message("list.back_button"),
+                callback_data=f"list:{page - 1}:{user_id}",
+            )
         )
     if page < total_pages - 1:
         buttons.append(
-            InlineKeyboardButton("Вперёд →", callback_data=f"list:{page + 1}:{user_id}")
+            InlineKeyboardButton(
+                get_message("list.forward_button"),
+                callback_data=f"list:{page + 1}:{user_id}",
+            )
         )
 
     keyboard = InlineKeyboardMarkup([buttons]) if buttons else None
@@ -500,11 +514,11 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("User {} requested submission list", user.id)
     submissions = _fetch_user_submissions(context, user.id)
     if submissions is None:
-        await update.message.reply_text("Хранилище недоступно, попробуйте позже.")
+        await update.message.reply_text(get_message("general.storage_unavailable"))
         logger.error("Valkey unavailable when fetching list for user {}", user.id)
         return ConversationHandler.END
     if not submissions:
-        await update.message.reply_text("У вас пока нет отправленных заявок.")
+        await update.message.reply_text(get_message("general.no_submissions"))
         logger.info("User {} has no submissions stored", user.id)
         return ConversationHandler.END
 
@@ -533,7 +547,7 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     user = query.from_user
     if user is None or user.id != expected_user_id:
-        await query.answer("Эта навигация недоступна.", show_alert=True)
+        await query.answer(get_message("general.navigation_denied"), show_alert=True)
         logger.warning(
             "User {} attempted to paginate submissions for user {}",
             getattr(user, "id", "unknown"),
@@ -548,11 +562,11 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.answer()
 
     if submissions is None:
-        await query.edit_message_text("Хранилище недоступно, попробуйте позже.")
+        await query.edit_message_text(get_message("general.storage_unavailable"))
         logger.error("Valkey unavailable during pagination for user {}", user.id)
         return
     if not submissions:
-        await query.edit_message_text("У вас пока нет отправленных заявок.")
+        await query.edit_message_text(get_message("general.no_submissions"))
         logger.info("User {} has no submissions to paginate", user.id)
         return
 
@@ -583,14 +597,17 @@ async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.id,
         update.message.text,
     )
+    used_condition = get_message("workflow.condition_used")
+    new_condition = get_message("workflow.condition_new")
     keyboard = [
         [
-            InlineKeyboardButton("Б/У", callback_data="Б/У"),
-            InlineKeyboardButton("Новое", callback_data="Новое"),
+            InlineKeyboardButton(used_condition, callback_data=used_condition),
+            InlineKeyboardButton(new_condition, callback_data=new_condition),
         ]
     ]
     await update.message.reply_text(
-        "Выберите состояние:", reply_markup=InlineKeyboardMarkup(keyboard)
+        get_message("workflow.condition_prompt"),
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return CONDITION
 
@@ -609,7 +626,7 @@ async def get_condition(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query.from_user.id,
         query.data,
     )
-    await query.edit_message_text("Отправьте 2–5 фото позиции")
+    await query.edit_message_text(get_message("workflow.photos_initial_prompt"))
     return PHOTOS
 
 
@@ -623,19 +640,19 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = store.get(user.id)
     if not user_data:
         logger.warning("Photo handler could not locate session for user {}", user.id)
-        await update.message.reply_text("Сессия не найдена, отправьте /new")
+        await update.message.reply_text(get_message("general.session_missing"))
         return ConversationHandler.END
 
     if not update.message.photo:
         logger.warning("User {} sent non-photo message during photo step", user.id)
-        await update.message.reply_text("Пожалуйста, отправьте фото позиции")
+        await update.message.reply_text(get_message("general.photo_required"))
         return PHOTOS
 
     photo_file_id = update.message.photo[-1].file_id
     session_dir: Path | None = user_data.get("session_dir")
     if session_dir is None:
         logger.error("Session directory missing for user {}", user.id)
-        await update.message.reply_text("Ошибка сохранения фото, отправьте /new")
+        await update.message.reply_text(get_message("general.photo_save_error"))
         return ConversationHandler.END
 
     photo_index = len(user_data["photos"]) + 1
@@ -662,7 +679,7 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             context,
             user_data,
-            "Фото получено. Ещё минимум одно фото.",
+            get_message("workflow.photos_additional_required"),
         )
         return PHOTOS
     elif count < 5:
@@ -673,8 +690,11 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             context,
             user_data,
-            f"Получено {count} фото. Если хотите добавить ещё — пришлите. "
-            "Когда хватит, напишите 'далее'.",
+            get_message(
+                "workflow.photos_additional_optional",
+                count=count,
+                keyword=SKIP_KEYWORD,
+            ),
         )
         return PHOTOS
     else:
@@ -683,7 +703,7 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update,
             context,
             user_data,
-            "Максимум 5 фото получено. Теперь введите *размер:*",
+            get_message("workflow.photos_max_prompt"),
             parse_mode="Markdown",
         )
         return SIZE
@@ -694,7 +714,9 @@ async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "User {} opted to skip additional photos",
         getattr(update.effective_user, "id", "unknown"),
     )
-    await update.message.reply_text("Введите *размер:*", parse_mode="Markdown")  # type: ignore
+    await update.message.reply_text(
+        get_message("workflow.size_prompt"), parse_mode="Markdown"
+    )  # type: ignore
     return SIZE
 
 
@@ -707,7 +729,9 @@ async def get_size(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = _get_application_store(context)
     store.set_fields(user.id, size=update.message.text)
     logger.info("User {} provided size: {}", user.id, update.message.text)
-    await update.message.reply_text("Введите *материал:*", parse_mode="Markdown")
+    await update.message.reply_text(
+        get_message("workflow.material_prompt"), parse_mode="Markdown"
+    )
     return MATERIAL
 
 
@@ -721,7 +745,7 @@ async def get_material(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store.set_fields(user.id, material=update.message.text)
     logger.info("User {} provided material: {}", user.id, update.message.text)
     await update.message.reply_text(
-        "Введите *короткое описание:*", parse_mode="Markdown"
+        get_message("workflow.description_prompt"), parse_mode="Markdown"
     )
     return DESCRIPTION
 
@@ -735,7 +759,9 @@ async def get_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = _get_application_store(context)
     store.set_fields(user.id, description=update.message.text)
     logger.info("User {} provided description", user.id)
-    await update.message.reply_text("Введите *цену:*", parse_mode="Markdown")
+    await update.message.reply_text(
+        get_message("workflow.price_prompt"), parse_mode="Markdown"
+    )
     return PRICE
 
 
@@ -748,9 +774,7 @@ async def get_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store = _get_application_store(context)
     store.set_fields(user.id, price=update.message.text)
     logger.info("User {} provided price: {}", user.id, update.message.text)
-    await update.message.reply_text(
-        "Теперь оставьте ваши контакты (телефон, @username и т.д.)"
-    )
+    await update.message.reply_text(get_message("workflow.contacts_prompt"))
     return CONTACTS
 
 
@@ -767,18 +791,18 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_data = store.get(user_id)
     if not user_data:
         logger.error("Submission data missing when finalizing for user {}", user_id)
-        await update.message.reply_text("Сессия не найдена, отправьте /new")
+        await update.message.reply_text(get_message("general.session_missing"))
         return ConversationHandler.END
 
-    text = (
-        f"*Новая заявка:*\n\n"
-        f"Позиция: {user_data['position']}\n"
-        f"Состояние: {user_data['condition']}\n"
-        f"Размер: {user_data['size']}\n"
-        f"Материал: {user_data['material']}\n"
-        f"Описание: {user_data['description']}\n"
-        f"Цена: {user_data['price']}\n"
-        f"Контакты: {user_data['contacts']}"
+    summary = get_message(
+        "workflow.summary_template",
+        position=user_data.get("position", ""),
+        condition=user_data.get("condition", ""),
+        size=user_data.get("size", ""),
+        material=user_data.get("material", ""),
+        description=user_data.get("description", ""),
+        price=user_data.get("price", ""),
+        contacts=user_data.get("contacts", ""),
     )
 
     photos = [Path(photo_path) for photo_path in user_data["photos"]]
@@ -793,15 +817,15 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photos,
     )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(summary, parse_mode="Markdown")
     logger.info(
         "Persisting submission for user {} with session {}",
         user_id,
         user_data.get("session_key"),
     )
     _persist_application(update, context, user_data)
-    await _forward_to_moderators(context, text, photos)
-    await update.message.reply_text("Заявка успешно отправлена! Спасибо.")
+    await _forward_to_moderators(context, summary, photos)
+    await update.message.reply_text(get_message("general.submission_success"))
     logger.info("Submission for user {} processed successfully", user_id)
     store.clear(user_id)
     return ConversationHandler.END
@@ -812,7 +836,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "User {} cancelled submission",
         getattr(update.effective_user, "id", "unknown"),
     )
-    await update.message.reply_text("Заявка отменена")  # type: ignore
+    await update.message.reply_text(get_message("general.submission_cancelled"))  # type: ignore
     return ConversationHandler.END
 
 
@@ -843,7 +867,7 @@ def main():
             CONDITION: [CallbackQueryHandler(get_condition)],
             PHOTOS: [
                 MessageHandler(filters.PHOTO, get_photos),
-                MessageHandler(filters.Regex("(?i)^далее$"), skip_photos),
+                MessageHandler(filters.Regex(SKIP_KEYWORD_PATTERN), skip_photos),
             ],
             SIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_size)],
             MATERIAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_material)],
