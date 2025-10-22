@@ -599,9 +599,7 @@ async def _prompt_broadcast_confirmation(
     """Send summary and confirmation buttons for the broadcast."""
 
     audience = data.get("audience", BROADCAST_AUDIENCE_ALL)
-    recipients, count, audience_label = _resolve_broadcast_recipients(
-        context, audience
-    )
+    recipients, count, audience_label = _resolve_broadcast_recipients(context, audience)
 
     if not recipients:
         await context.bot.send_message(
@@ -670,9 +668,7 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
 
     audience = data.get("audience", BROADCAST_AUDIENCE_ALL)
-    recipients, count, audience_label = _resolve_broadcast_recipients(
-        context, audience
-    )
+    recipients, count, audience_label = _resolve_broadcast_recipients(context, audience)
     if not recipients:
         await query.edit_message_text(get_message("admin.broadcast_no_recipients"))
         logger.info(

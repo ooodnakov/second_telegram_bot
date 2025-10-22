@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-
 from datetime import datetime
 from uuid import uuid4
 
