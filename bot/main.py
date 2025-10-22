@@ -325,7 +325,7 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         store = _get_application_store(context)
-    except RuntimeError as exc:
+    except RuntimeError:
         logger.exception("Failed to obtain application store for user %s", user.id)
         await update.message.reply_text(
             get_message("general.storage_unavailable_support")
@@ -601,8 +601,8 @@ async def get_position(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_condition = get_message("workflow.condition_new")
     keyboard = [
         [
-            InlineKeyboardButton(used_condition, callback_data=used_condition),
-            InlineKeyboardButton(new_condition, callback_data=new_condition),
+            InlineKeyboardButton(used_condition, callback_data="used"),
+            InlineKeyboardButton(new_condition, callback_data="new"),
         ]
     ]
     await update.message.reply_text(
@@ -620,11 +620,18 @@ async def get_condition(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer()
     store = _get_application_store(context)
-    store.set_fields(query.from_user.id, condition=query.data, photos=[])
+    condition_map = {
+        "used": get_message("workflow.condition_used"),
+        "new": get_message("workflow.condition_new"),
+    }
+    condition_key = query.data
+    condition_text = condition_map.get(condition_key, condition_key)
+    store.set_fields(query.from_user.id, condition=condition_text, photos=[])
     logger.info(
-        "User {} selected condition {}",
+        "User {} selected condition key {} (value: {})",
         query.from_user.id,
-        query.data,
+        condition_key,
+        condition_text,
     )
     await query.edit_message_text(get_message("workflow.photos_initial_prompt"))
     return PHOTOS
