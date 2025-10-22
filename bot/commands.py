@@ -110,7 +110,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_lines.append(get_message("help.super_admin_list"))
 
     text = "\n".join(text_lines).strip()
-    await update.message.reply_text(text, parse_mode="Markdown")
+    try:
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except BadRequest as exc:
+        _MARKDOWN_PARSE_ERROR = "can't parse entities"
+        if _MARKDOWN_PARSE_ERROR in str(exc).lower():
+            logger.warning(
+                "Failed to send help text with Markdown for user {}: {}", user.id, exc
+            )
+            await update.message.reply_text(text)
+        else:
+            raise
     return ConversationHandler.END
 
 
