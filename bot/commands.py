@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from datetime import datetime
 from uuid import uuid4
 
@@ -288,6 +290,16 @@ def _format_submission_status(submission: dict[str, str]) -> str:
 def _build_revoke_cache(
     context: ContextTypes.DEFAULT_TYPE, user_id: int
 ) -> dict[str, dict[str, str]] | None:
+    """Populate the revoke cache with the user's submissions if available.
+
+    Args:
+        context: Telegram context storing per-user state.
+        user_id: Identifier of the user whose submissions should be cached.
+
+    Returns:
+        A mapping of session keys to submission metadata, or ``None`` when the
+        storage backend is unavailable.
+    """
     submissions = fetch_user_submissions(context, user_id)
     if submissions is None:
         return None
@@ -455,13 +467,9 @@ async def handle_revoke_callback(
 
         success = mark_application_revoked(context, session_key, user.id)
         if not success:
-            cache = _build_revoke_cache(context, user.id)
-            if cache and session_key in cache and cache[session_key].get("revoked_at"):
-                await query.edit_message_text(get_message("revoke.already_revoked"))
-            else:
-                await query.edit_message_text(
-                    get_message("general.storage_unavailable_support")
-                )
+            await query.edit_message_text(
+                get_message("general.storage_unavailable_support")
+            )
             return
 
         cache = _build_revoke_cache(context, user.id) or {}
@@ -470,7 +478,7 @@ async def handle_revoke_callback(
         message_text = get_message("revoke.success")
         status_suffix = status.strip()
         if status_suffix:
-            message_text = f"{message_text} {status_suffix}"
+            message_text = f"{message_text} {html.escape(status_suffix)}"
         await query.edit_message_text(message_text)
         logger.info("User %s revoked submission %s", user.id, session_key)
         return

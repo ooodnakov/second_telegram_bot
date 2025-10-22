@@ -271,8 +271,12 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
         return False
 
     timestamp = datetime.now(UTC).isoformat()
+    if not timestamp:
+        logger.error("Failed to generate revocation timestamp for %s", key)
+        return False
+
     try:
-        client.hset(  # type: ignore[attr-defined]
+        client.hset(  # type: ignore[attr-defined] - runtime Valkey client exposes hset
             key,
             mapping={"revoked_at": timestamp, "revoked_by": str(user_id)},
         )
