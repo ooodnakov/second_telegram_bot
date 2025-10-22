@@ -970,6 +970,15 @@ def _build_caption(
     photo_count = sum(1 for path in _photo_paths(submission) if path.exists())
     photo_info = str(photo_count) if photo_count else get_message("admin.photo_missing")
 
+    revoked_at = submission.get("revoked_at", "")
+    if revoked_at:
+        status = get_message(
+            "admin.status_revoked",
+            revoked_at=html.escape(_format_timestamp(revoked_at)),
+        )
+    else:
+        status = get_message("admin.status_active")
+
     return get_message(
         "admin.view_caption",
         index=index + 1,
@@ -977,6 +986,7 @@ def _build_caption(
         mode=html.escape(mode_label),
         user_label=html.escape(user_label),
         created_at=html.escape(_format_timestamp(submission.get("created_at", ""))),
+        status=html.escape(status),
         position=html.escape(field("position")),
         condition=html.escape(field("condition")),
         size=html.escape(field("size")),

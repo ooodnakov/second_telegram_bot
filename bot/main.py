@@ -22,10 +22,12 @@ from bot.admin_commands import (
 )
 from bot.commands import (
     error_handler,
+    handle_revoke_callback,
     help_command,
     list_applications,
     new,
     paginate_list,
+    revoke_application,
     start,
 )
 from bot.config import create_valkey_client, load_config
@@ -117,11 +119,13 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("list", list_applications))
+    app.add_handler(CommandHandler("revoke", revoke_application))
     app.add_handler(CommandHandler("applications", view_all_applications))
     app.add_handler(CommandHandler("admins", show_admin_roster))
     app.add_handler(CommandHandler("broadcast_history", show_broadcast_history))
     app.add_handler(CommandHandler("scheduled", show_scheduled_broadcasts))
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
     app.add_handler(
         CallbackQueryHandler(navigate_applications, pattern=r"^admin_view:")
     )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+
 from datetime import datetime
 from uuid import uuid4
 
@@ -9,6 +11,7 @@ from bot.admin import (
     fetch_user_submissions,
     is_admin,
     is_super_admin,
+    mark_application_revoked,
     record_active_user,
 )
 from bot.constants import LIST_PAGE_SIZE, MEDIA_ROOT, MOSCOW_TZ, POSITION, UTC
@@ -18,6 +21,8 @@ from bot.storage import get_application_store
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
+
+REVOKE_CACHE_KEY = "revoke_submissions"
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,6 +236,7 @@ def _render_applications_page(
                 index=index,
                 position=submission.get("position", get_message("general.placeholder")),
                 created_at=_format_created_at(submission.get("created_at", "")),
+                status=_format_submission_status(submission),
             )
         )
     text = "\n".join(lines)
@@ -281,11 +287,220 @@ def _format_created_at(value: str) -> str:
         return value
 
 
+def _format_submission_status(submission: dict[str, str]) -> str:
+    revoked_at = submission.get("revoked_at", "")
+    if not revoked_at:
+        return ""
+    return get_message(
+        "list.status_revoked",
+        revoked_at=_format_created_at(revoked_at),
+    )
+
+
+def _build_revoke_cache(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, dict[str, str]] | None:
+    """Populate the revoke cache with the user's submissions if available.
+
+    Args:
+        context: Telegram context storing per-user state.
+        user_id: Identifier of the user whose submissions should be cached.
+
+    Returns:
+        A mapping of session keys to submission metadata, or ``None`` when the
+        storage backend is unavailable.
+    """
+    submissions = fetch_user_submissions(context, user_id)
+    if submissions is None:
+        return None
+    cache: dict[str, dict[str, str]] = {}
+    for submission in submissions:
+        session_key = submission.get("session_key")
+        if not session_key:
+            continue
+        cache[session_key] = submission
+    context.user_data[REVOKE_CACHE_KEY] = cache  # type: ignore[index]
+    return cache
+
+
+def _get_revoke_cache(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, dict[str, str]]:
+    cache = context.user_data.get(REVOKE_CACHE_KEY)  # type: ignore[index]
+    if isinstance(cache, dict):
+        return cache
+    rebuilt = _build_revoke_cache(context, user_id)
+    return rebuilt or {}
+
+
+async def revoke_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+    if user is None or message is None:
+        logger.warning("Received /revoke update without message or user: {}", update)
+        return ConversationHandler.END
+
+    cache = _build_revoke_cache(context, user.id)
+    if cache is None:
+        await message.reply_text(get_message("general.storage_unavailable"))
+        logger.error("Valkey unavailable when user %s attempted revocation", user.id)
+        return ConversationHandler.END
+
+    active_items = [
+        submission for submission in cache.values() if not submission.get("revoked_at")
+    ]
+    if not active_items:
+        await message.reply_text(get_message("revoke.no_active"))
+        logger.info("User %s has no active submissions to revoke", user.id)
+        return ConversationHandler.END
+
+    lines = [get_message("revoke.prompt")]
+    keyboard: list[list[InlineKeyboardButton]] = []
+    for index, submission in enumerate(active_items, start=1):
+        position = submission.get("position", get_message("general.placeholder"))
+        created_at = _format_created_at(submission.get("created_at", ""))
+        lines.append(
+            get_message(
+                "revoke.list_entry",
+                index=index,
+                position=position,
+                created_at=created_at,
+            )
+        )
+        session_key = submission.get("session_key", "")
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"{index}. {position}",
+                    callback_data=f"revoke:select:{session_key}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                get_message("revoke.button_cancel"), callback_data="revoke:cancel"
+            )
+        ]
+    )
+
+    text = "\n".join(lines)
+    await message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    logger.debug("Presented revocation options to user %s", user.id)
+    return ConversationHandler.END
+
+
+async def handle_revoke_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    if query is None:
+        logger.warning("Received revoke callback without query: {}", update)
+        return
+
+    data = (query.data or "").split(":")
+    if not data or data[0] != "revoke":
+        return
+
+    await query.answer()
+
+    user = query.from_user
+    if user is None:
+        logger.warning("Revoke callback missing user: %s", update)
+        return
+
+    if len(data) >= 2 and data[1] == "cancel":
+        await query.edit_message_text(get_message("revoke.cancelled"))
+        context.user_data.pop(REVOKE_CACHE_KEY, None)  # type: ignore[index]
+        logger.debug("User %s cancelled revocation", user.id)
+        return
+
+    if len(data) >= 3 and data[1] == "select":
+        session_key = data[2]
+        cache = _get_revoke_cache(context, user.id)
+        submission = cache.get(session_key)
+        if not submission:
+            cache = _build_revoke_cache(context, user.id) or {}
+            submission = cache.get(session_key)
+        if submission is None:
+            await query.edit_message_text(get_message("general.no_submissions"))
+            logger.warning(
+                "User %s attempted to revoke missing submission %s",
+                user.id,
+                session_key,
+            )
+            return
+        if submission.get("revoked_at"):
+            await query.edit_message_text(get_message("revoke.already_revoked"))
+            return
+        text = get_message(
+            "revoke.confirm",
+            position=submission.get("position", get_message("general.placeholder")),
+            created_at=_format_created_at(submission.get("created_at", "")),
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        get_message("revoke.button_confirm"),
+                        callback_data=f"revoke:confirm:{session_key}",
+                    ),
+                    InlineKeyboardButton(
+                        get_message("revoke.button_decline"),
+                        callback_data="revoke:cancel",
+                    ),
+                ]
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=keyboard)
+        logger.debug(
+            "User %s prompted to confirm revocation of submission %s",
+            user.id,
+            session_key,
+        )
+        return
+
+    if len(data) >= 3 and data[1] == "confirm":
+        session_key = data[2]
+        cache = _get_revoke_cache(context, user.id)
+        submission = cache.get(session_key)
+        if not submission:
+            cache = _build_revoke_cache(context, user.id) or {}
+            submission = cache.get(session_key)
+        if submission and submission.get("revoked_at"):
+            await query.edit_message_text(get_message("revoke.already_revoked"))
+            return
+
+        success = mark_application_revoked(context, session_key, user.id)
+        if not success:
+            await query.edit_message_text(
+                get_message("general.storage_unavailable_support")
+            )
+            return
+
+        cache = _build_revoke_cache(context, user.id) or {}
+        updated = cache.get(session_key)
+        status = _format_submission_status(updated or {})
+        message_text = get_message("revoke.success")
+        status_suffix = status.strip()
+        if status_suffix:
+            message_text = f"{message_text} {html.escape(status_suffix)}"
+        await query.edit_message_text(message_text)
+        logger.info("User %s revoked submission %s", user.id, session_key)
+        return
+
+
 __all__ = [
     "error_handler",
     "help_command",
     "list_applications",
     "new",
     "paginate_list",
+    "revoke_application",
+    "handle_revoke_callback",
     "start",
 ]
