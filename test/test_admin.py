@@ -61,6 +61,54 @@ def test_recipients_for_audience_filters_recent(bot_modules) -> None:
     assert recent_recipients == {1}
 
 
+def test_mark_application_revoked_success(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    session_key = "session123"
+    key = f"{prefix}:{session_key}"
+
+    client.hset(
+        key,
+        mapping={
+            "session_key": session_key,
+            "user_id": "42",
+            "position": "Test",
+        },
+    )
+    client.sadd(f"{prefix}:applications", key)
+
+    result = bot_modules.admin.mark_application_revoked(context, session_key, 42)
+    assert result is True
+
+    record = client.hgetall(key)
+    assert record.get("revoked_by") == "42"
+    assert record.get("revoked_at")
+
+
+def test_mark_application_revoked_requires_owner(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    session_key = "session123"
+    key = f"{prefix}:{session_key}"
+
+    client.hset(
+        key,
+        mapping={
+            "session_key": session_key,
+            "user_id": "7",
+        },
+    )
+    client.sadd(f"{prefix}:applications", key)
+
+    result = bot_modules.admin.mark_application_revoked(context, session_key, 42)
+    assert result is False
+
+    record = client.hgetall(key)
+    assert "revoked_at" not in record
+
+
 def test_show_admin_roster_lists_assignments(bot_modules) -> None:
     admin_commands = bot_modules.admin_commands
     storage = bot_modules.storage
