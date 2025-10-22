@@ -3,6 +3,8 @@
 token = 1234567890:ABCdefGhIJKlmnoPQRstuVWxyz
 # Optional: comma-separated chat IDs that receive completed submissions
 # moderator_chat_ids = 123456789,987654321
+# Comma-separated list of super admin user IDs (may add other admins at runtime)
+# super_admin_ids = 123456789
 
 [valkey]
 # Valkey Configuration

@@ -2,6 +2,24 @@
 
 from __future__ import annotations
 
+from bot.admin_commands import (
+    cancel_admin_action,
+    choose_broadcast_audience,
+    confirm_broadcast,
+    handle_broadcast_decision,
+    navigate_applications,
+    receive_admin_id,
+    receive_broadcast_message,
+    receive_broadcast_schedule,
+    receive_remove_admin_id,
+    show_admin_roster,
+    show_broadcast_history,
+    show_scheduled_broadcasts,
+    start_add_admin,
+    start_broadcast,
+    start_remove_admin,
+    view_all_applications,
+)
 from bot.commands import (
     error_handler,
     help_command,
@@ -12,6 +30,13 @@ from bot.commands import (
 )
 from bot.config import create_valkey_client, load_config
 from bot.constants import (
+    ADMIN_ADD_ADMIN_WAIT_ID,
+    ADMIN_BROADCAST_AUDIENCE,
+    ADMIN_BROADCAST_CONFIRM,
+    ADMIN_BROADCAST_DECISION,
+    ADMIN_BROADCAST_MESSAGE,
+    ADMIN_BROADCAST_SCHEDULE_TIME,
+    ADMIN_REMOVE_ADMIN_WAIT_ID,
     CONDITION,
     CONTACTS,
     DESCRIPTION,
@@ -61,6 +86,7 @@ def main() -> None:
     app.bot_data["valkey_client"] = valkey_client
     app.bot_data["valkey_prefix"] = config["valkey"]["prefix"]
     app.bot_data["moderator_chat_ids"] = config.get("moderator_chat_ids", [])
+    app.bot_data["super_admin_ids"] = config.get("super_admin_ids", [])
     logger.debug(
         "Bot data configured with Valkey prefix {} and {} moderator chats",
         config["valkey"]["prefix"],
@@ -91,8 +117,72 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("list", list_applications))
+    app.add_handler(CommandHandler("applications", view_all_applications))
+    app.add_handler(CommandHandler("admins", show_admin_roster))
+    app.add_handler(CommandHandler("broadcast_history", show_broadcast_history))
+    app.add_handler(CommandHandler("scheduled", show_scheduled_broadcasts))
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:\d+:\d+$"))
+    app.add_handler(
+        CallbackQueryHandler(navigate_applications, pattern=r"^admin_view:")
+    )
+
+    add_admin_conv = ConversationHandler(
+        entry_points=[CommandHandler("addadmin", start_add_admin)],
+        states={
+            ADMIN_ADD_ADMIN_WAIT_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_admin_id)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin_action)],
+        per_message=False,
+    )
+
+    remove_admin_conv = ConversationHandler(
+        entry_points=[CommandHandler("removeadmin", start_remove_admin)],
+        states={
+            ADMIN_REMOVE_ADMIN_WAIT_ID: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_remove_admin_id)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin_action)],
+        per_message=False,
+    )
+
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", start_broadcast)],
+        states={
+            ADMIN_BROADCAST_AUDIENCE: [
+                CallbackQueryHandler(
+                    choose_broadcast_audience, pattern=r"^broadcast:audience:"
+                )
+            ],
+            ADMIN_BROADCAST_MESSAGE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_broadcast_message
+                )
+            ],
+            ADMIN_BROADCAST_DECISION: [
+                CallbackQueryHandler(
+                    handle_broadcast_decision, pattern=r"^broadcast:decision:"
+                )
+            ],
+            ADMIN_BROADCAST_SCHEDULE_TIME: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, receive_broadcast_schedule
+                )
+            ],
+            ADMIN_BROADCAST_CONFIRM: [
+                CallbackQueryHandler(confirm_broadcast, pattern=r"^broadcast:confirm:")
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_admin_action)],
+        per_message=False,
+    )
+
     app.add_handler(conv_handler)
+    app.add_handler(add_admin_conv)
+    app.add_handler(remove_admin_conv)
+    app.add_handler(broadcast_conv)
     app.add_error_handler(error_handler)
     logger.info("Handlers registered; starting polling")
     app.run_polling()

@@ -24,8 +24,18 @@ class InMemoryValkey:
     def hgetall(self, name: str) -> dict[str, str]:
         return self._hashes.get(name, {}).copy()
 
-    def sadd(self, name: str, key: str) -> None:
-        self._sets.setdefault(name, set()).add(key)
+    def sadd(self, name: str, key: str) -> int:
+        target = self._sets.setdefault(name, set())
+        before = len(target)
+        target.add(key)
+        return int(len(target) > before)
+
+    def srem(self, name: str, key: str) -> int:
+        target = self._sets.get(name)
+        if not target or key not in target:
+            return 0
+        target.remove(key)
+        return 1
 
     def smembers(self, name: str) -> set[str]:
         return self._sets.get(name, set()).copy()

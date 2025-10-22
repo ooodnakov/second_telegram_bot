@@ -63,6 +63,26 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
                 logger.error("Invalid moderator chat id encountered: {}", candidate)
                 raise RuntimeError(f"Invalid moderator chat id: {candidate!r}") from exc
 
+    super_admins: list[int] = []
+    raw_super_admins = parser.get(
+        CONFIG_SECTION, "super_admin_ids", fallback=""
+    ).strip()
+    if raw_super_admins:
+        for raw_id in raw_super_admins.replace("\n", ",").split(","):
+            candidate = raw_id.strip()
+            if not candidate:
+                continue
+            try:
+                super_admins.append(int(candidate))
+            except ValueError as exc:
+                logger.error(
+                    "Invalid super admin id encountered in config: {}",
+                    candidate,
+                )
+                raise RuntimeError(f"Invalid super admin id: {candidate!r}") from exc
+
+    super_admins = sorted(set(super_admins))
+
     if not parser.has_section(VALKEY_CONFIG_SECTION):
         logger.error(
             "Section '{}' missing in config file {}", VALKEY_CONFIG_SECTION, config_path
@@ -89,8 +109,9 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     )
 
     logger.info(
-        "Configuration loaded for {} moderators and Valkey host {}:{} with prefix '{}'",
+        "Configuration loaded for {} moderators, {} super admins and Valkey host {}:{} with prefix '{}'",
         len(moderators),
+        len(super_admins),
         host,
         port,
         prefix,
@@ -99,6 +120,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     return {
         "token": token,
         "moderator_chat_ids": moderators,
+        "super_admin_ids": super_admins,
         "valkey": {
             "host": host,
             "port": port,

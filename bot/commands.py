@@ -5,6 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
+from bot.admin import (
+    fetch_user_submissions,
+    is_admin,
+    is_super_admin,
+    record_active_user,
+)
 from bot.constants import LIST_PAGE_SIZE, MEDIA_ROOT, MOSCOW_TZ, POSITION, UTC
 from bot.logging import logger
 from bot.messages import get_message
@@ -12,10 +18,9 @@ from bot.storage import get_application_store
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
-from valkey.exceptions import ValkeyError
 
 
-async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display a greeting message when the user invokes /start."""
 
     user = update.effective_user
@@ -24,6 +29,8 @@ async def start(update: Update, _: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} invoked /start", user.id)
+    record_active_user(context, user.id)
+
     await update.message.reply_text(get_message("start.greeting"))
     await update.message.reply_text(get_message("start.new_instruction"))
     return ConversationHandler.END
@@ -45,6 +52,8 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
             get_message("general.storage_unavailable_support")
         )
         return ConversationHandler.END
+
+    record_active_user(context, user.id)
 
     await update.message.reply_text(
         get_message("workflow.position_prompt"),
@@ -70,7 +79,7 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return POSITION
 
 
-async def help_command(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reply with help text for the bot."""
 
     user = update.effective_user
@@ -79,7 +88,24 @@ async def help_command(update: Update, _: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} requested help", user.id)
-    await update.message.reply_text(get_message("help.text"))
+    text_lines = [get_message("help.text"), ""]
+
+    if is_admin(context, user.id):
+        text_lines.append(get_message("help.admin_header"))
+        text_lines.append(get_message("help.admin_view"))
+        text_lines.append(get_message("help.admin_broadcast"))
+        text_lines.append(get_message("help.admin_history"))
+        text_lines.append(get_message("help.admin_scheduled"))
+        text_lines.append("")
+
+    if is_super_admin(context, user.id):
+        text_lines.append(get_message("help.super_admin_header"))
+        text_lines.append(get_message("help.super_admin_add"))
+        text_lines.append(get_message("help.super_admin_remove"))
+        text_lines.append(get_message("help.super_admin_list"))
+
+    text = "\n".join(text_lines).strip()
+    await update.message.reply_text(text, parse_mode="Markdown")
     return ConversationHandler.END
 
 
@@ -91,7 +117,7 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Received /list update without message or user: {}", update)
         return ConversationHandler.END
 
-    submissions = _fetch_user_submissions(context, user.id)
+    submissions = fetch_user_submissions(context, user.id)
     if submissions is None:
         await update.message.reply_text(get_message("general.storage_unavailable"))
         logger.error("Valkey unavailable when fetching list for user {}", user.id)
@@ -138,7 +164,7 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     submissions = context.user_data.get("list_submissions")  # type: ignore[index]
     if not isinstance(submissions, list):
-        submissions = _fetch_user_submissions(context, user.id)
+        submissions = fetch_user_submissions(context, user.id)
 
     await query.answer()
 
@@ -172,76 +198,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         "Unhandled exception during update processing for update: {}",
         update,
     )
-
-
-def _fetch_user_submissions(
-    context: ContextTypes.DEFAULT_TYPE,
-    user_id: int,
-) -> list[dict[str, str]] | None:
-    valkey_client = context.application.bot_data.get("valkey_client")
-    if valkey_client is None:
-        logger.warning(
-            "Valkey client not configured; cannot fetch submissions for user {}",
-            user_id,
-        )
-        return None
-
-    prefix = context.application.bot_data.get("valkey_prefix", "telegram_auto_poster")
-    user_applications_key = f"{prefix}:user:{user_id}:applications"
-    legacy_applications_key = f"{prefix}:applications"
-
-    try:
-        raw_keys = valkey_client.smembers(user_applications_key)  # type: ignore[attr-defined]
-    except ValkeyError:
-        logger.exception(
-            "Failed to fetch application list for user {} from Valkey",
-            user_id,
-        )
-        return None
-
-    if not raw_keys:
-        try:
-            raw_keys = valkey_client.smembers(legacy_applications_key)  # type: ignore[attr-defined]
-        except ValkeyError:
-            logger.exception("Failed to fetch legacy application list from Valkey")
-            return None
-        if not raw_keys:
-            logger.info("No submissions stored for user {}", user_id)
-            return []
-        logger.debug(
-            "Falling back to legacy application set {} for user {}",
-            legacy_applications_key,
-            user_id,
-        )
-
-    submissions: list[dict[str, str]] = []
-    for raw_key in raw_keys:
-        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
-        try:
-            raw_data = valkey_client.hgetall(key)
-        except ValkeyError:
-            logger.exception("Failed to fetch application data for key {}", key)
-            continue
-        if not raw_data:
-            continue
-
-        record: dict[str, str] = {}
-        for raw_field, raw_value in raw_data.items():
-            field = raw_field.decode() if isinstance(raw_field, bytes) else raw_field
-            value = raw_value.decode() if isinstance(raw_value, bytes) else raw_value
-            record[field] = value
-
-        if record.get("user_id") != str(user_id):
-            continue
-        submissions.append(record)
-
-    submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
-    logger.info(
-        "Fetched {} submissions for user {} from Valkey",
-        len(submissions),
-        user_id,
-    )
-    return submissions
 
 
 def _render_applications_page(
