@@ -288,8 +288,85 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
     return True
 
 
+def mark_application_reviewed(
+    context: Any, session_key: str, reviewer_id: int
+) -> str | None:
+    """Mark an application as reviewed by an admin.
+
+    Args:
+        context: Telegram context providing Valkey access.
+        session_key: Identifier of the submission session to update.
+        reviewer_id: Administrator ID applying the review flag.
+
+    Returns:
+        ISO8601 timestamp of the review if the update succeeds, otherwise
+        ``None``.
+    """
+
+    client = _get_client(context)
+    if client is None:
+        logger.warning(
+            "Valkey client missing while marking application %s reviewed",
+            session_key,
+        )
+        return None
+
+    prefix = _get_prefix(context)
+    key = f"{prefix}:{session_key}"
+    record = load_application(client, key)
+    if not record:
+        logger.warning("Application %s not found for review", key)
+        return None
+
+    timestamp = datetime.now(UTC).isoformat()
+
+    try:
+        client.hset(  # type: ignore[attr-defined]
+            key,
+            mapping={"reviewed_at": timestamp, "reviewed_by": str(reviewer_id)},
+        )
+    except ValkeyError:
+        logger.exception("Failed to mark application %s as reviewed", key)
+        return None
+
+    logger.info("Application %s marked reviewed by admin %s", key, reviewer_id)
+    return timestamp
+
+
+def clear_application_review(context: Any, session_key: str) -> bool:
+    """Remove the review flag from an application."""
+
+    client = _get_client(context)
+    if client is None:
+        logger.warning(
+            "Valkey client missing while clearing review flag for %s",
+            session_key,
+        )
+        return False
+
+    prefix = _get_prefix(context)
+    key = f"{prefix}:{session_key}"
+    record = load_application(client, key)
+    if not record:
+        logger.warning("Application %s not found while clearing review", key)
+        return False
+
+    try:
+        client.hset(  # type: ignore[attr-defined]
+            key,
+            mapping={"reviewed_at": "", "reviewed_by": ""},
+        )
+    except ValkeyError:
+        logger.exception("Failed to clear review flag for application %s", key)
+        return False
+
+    logger.info("Cleared review flag for application %s", key)
+    return True
+
+
 __all__ = [
     "add_admin",
+    "clear_application_review",
     "fetch_all_submissions",
     "fetch_user_submissions",
     "get_admins",
@@ -302,6 +379,7 @@ __all__ = [
     "load_broadcast_record",
     "remove_admin",
     "mark_application_revoked",
+    "mark_application_reviewed",
     "record_active_user",
     "recipients_for_audience",
     "save_broadcast_record",

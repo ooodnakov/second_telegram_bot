@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from bot.admin import (
     add_admin,
+    clear_application_review,
     fetch_all_submissions,
     get_admins,
     get_super_admins,
@@ -20,6 +21,7 @@ from bot.admin import (
     is_super_admin,
     list_broadcast_records,
     load_broadcast_record,
+    mark_application_reviewed,
     recipients_for_audience,
     remove_admin,
     save_broadcast_record,
@@ -203,26 +205,28 @@ async def navigate_applications(
     if action == "n" and len(data) >= 4:
         mode = data[2]
         direction = data[3]
-        if mode not in state["ordered"]:
+        ordered = state.get("ordered", {})
+        if mode not in ordered:
             await query.answer()
             logger.warning("Unknown mode %s in admin navigation", mode)
             return
-        index = state["indexes"].get(mode, 0)
-        total = len(state["ordered"][mode])
+        indexes = state.setdefault("indexes", {})
+        index = indexes.get(mode, 0)
+        total = len(ordered.get(mode, []))
         if direction == "next":
             if index >= total - 1:
                 await query.answer(
                     get_message("admin.navigation_end"), show_alert=False
                 )
                 return
-            state["indexes"][mode] = index + 1
+            indexes[mode] = index + 1
         elif direction == "prev":
             if index <= 0:
                 await query.answer(
                     get_message("admin.navigation_end"), show_alert=False
                 )
                 return
-            state["indexes"][mode] = index - 1
+            indexes[mode] = index - 1
         else:
             await query.answer()
             return
@@ -236,13 +240,75 @@ async def navigate_applications(
         if mode == state.get("mode"):
             await query.answer(get_message("admin.already_mode"), show_alert=False)
             return
-        if mode not in state["ordered"]:
+        ordered = state.get("ordered", {})
+        if mode not in ordered:
             await query.answer()
             logger.warning("Unknown admin mode %s", mode)
             return
         state["mode"] = mode
         state.setdefault("indexes", {}).setdefault(mode, 0)
         await query.answer()
+        await _render_admin_application(context, state)
+        return
+
+    if action == "r" and len(data) >= 4:
+        sub_action = data[2]
+        session_key = data[3]
+        submission = _find_submission(state, session_key)
+        if submission is None:
+            await query.answer(get_message("admin.review_missing"), show_alert=True)
+            logger.warning(
+                "Review toggle requested for unknown session %s", session_key
+            )
+            return
+        user = query.from_user
+        if user is None:
+            await query.answer()
+            logger.warning(
+                "Review toggle missing user context for session %s", session_key
+            )
+            return
+        if sub_action == "set":
+            timestamp = mark_application_reviewed(context, session_key, user.id)
+            if not timestamp:
+                await query.answer(
+                    get_message("admin.review_mark_failed"), show_alert=True
+                )
+                return
+            submission["reviewed_at"] = timestamp
+            submission["reviewed_by"] = str(user.id)
+            message_key = "admin.review_marked"
+        elif sub_action == "clear":
+            success = clear_application_review(context, session_key)
+            if not success:
+                await query.answer(
+                    get_message("admin.review_clear_failed"), show_alert=True
+                )
+                return
+            submission["reviewed_at"] = ""
+            submission["reviewed_by"] = ""
+            message_key = "admin.review_cleared"
+        else:
+            await query.answer()
+            return
+
+        _apply_filter(state)
+        await query.answer(get_message(message_key), show_alert=False)
+        await _render_admin_application(context, state)
+        return
+
+    if action == "f" and len(data) >= 3:
+        toggle = data[2]
+        if toggle != "toggle":
+            await query.answer()
+            return
+        hide_reviewed = not state.get("filter_hide_reviewed", False)
+        state["filter_hide_reviewed"] = hide_reviewed
+        _apply_filter(state)
+        message_key = (
+            "admin.filter_enabled" if hide_reviewed else "admin.filter_disabled"
+        )
+        await query.answer(get_message(message_key), show_alert=False)
         await _render_admin_application(context, state)
         return
 
@@ -955,7 +1021,13 @@ async def execute_broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def _build_view_state(submissions: list[dict[str, str]]) -> dict[str, Any]:
     labels = _build_user_labels(submissions)
-    time_order = submissions
+    lookup: dict[str, dict[str, str]] = {}
+    for submission in submissions:
+        session_key = submission.get("session_key")
+        if session_key:
+            lookup[session_key] = submission
+
+    time_order = list(submissions)
     user_order = sorted(
         submissions,
         key=lambda item: (
@@ -963,13 +1035,69 @@ def _build_view_state(submissions: list[dict[str, str]]) -> dict[str, Any]:
             -_timestamp_key(item.get("created_at", "")),
         ),
     )
-    return {
+    state: dict[str, Any] = {
         "mode": "time",
-        "ordered": {"time": time_order, "user": user_order},
+        "ordered_all": {"time": time_order, "user": user_order},
+        "ordered": {},
         "indexes": {"time": 0, "user": 0},
         "labels": labels,
         "message_id": None,
+        "filter_hide_reviewed": False,
+        "lookup": lookup,
     }
+    _apply_filter(state)
+    return state
+
+
+def _apply_filter(state: dict[str, Any]) -> None:
+    ordered_all_raw = state.get("ordered_all")
+    if not isinstance(ordered_all_raw, dict):
+        ordered_all_raw = {}
+    hide_reviewed = state.get("filter_hide_reviewed", False)
+    filtered: dict[str, list[dict[str, str]]] = {}
+
+    for mode, items in ordered_all_raw.items():
+        if not isinstance(items, list):
+            continue
+        if hide_reviewed:
+            filtered_items = [
+                item
+                for item in items
+                if isinstance(item, dict) and not item.get("reviewed_at")
+            ]
+        else:
+            filtered_items = [item for item in items if isinstance(item, dict)]
+        filtered[mode] = filtered_items
+
+    state["ordered"] = filtered
+    indexes = state.setdefault("indexes", {})
+    for mode, items in filtered.items():
+        if not items:
+            indexes[mode] = 0
+        else:
+            current_index = indexes.get(mode, 0)
+            indexes[mode] = max(0, min(current_index, len(items) - 1))
+
+
+def _find_submission(state: dict[str, Any], session_key: str) -> dict[str, str] | None:
+    lookup = state.get("lookup")
+    if isinstance(lookup, dict):
+        submission = lookup.get(session_key)
+        if isinstance(submission, dict):
+            return submission
+
+    ordered_all = state.get("ordered_all", {})
+    if isinstance(ordered_all, dict):
+        for items in ordered_all.values():
+            if not isinstance(items, list):
+                continue
+            for submission in items:
+                if (
+                    isinstance(submission, dict)
+                    and submission.get("session_key") == session_key
+                ):
+                    return submission
+    return None
 
 
 def _build_user_labels(submissions: list[dict[str, str]]) -> dict[str, str]:
@@ -1049,7 +1177,18 @@ def _build_caption(
             revoked_at=html.escape(_format_timestamp(revoked_at)),
         )
     else:
-        status = get_message("admin.status_active")
+        reviewed_at = submission.get("reviewed_at", "")
+        if reviewed_at:
+            reviewer = submission.get("reviewed_by", "") or get_message(
+                "general.placeholder"
+            )
+            status = get_message(
+                "admin.status_reviewed",
+                reviewed_at=html.escape(_format_timestamp(reviewed_at)),
+                reviewed_by=html.escape(str(reviewer)),
+            )
+        else:
+            status = get_message("admin.status_active")
 
     return get_message(
         "admin.view_caption",
@@ -1071,9 +1210,12 @@ def _build_caption(
 
 
 def _build_keyboard(
-    state: dict[str, Any], mode: str, index: int
+    state: dict[str, Any],
+    mode: str,
+    index: int,
+    submission: dict[str, str] | None,
 ) -> InlineKeyboardMarkup:
-    submissions = state["ordered"].get(mode, [])
+    submissions = state.get("ordered", {}).get(mode, [])
     total = len(submissions)
     buttons: list[list[InlineKeyboardButton]] = []
     if total > 1:
@@ -1091,6 +1233,35 @@ def _build_keyboard(
             InlineKeyboardButton("»", callback_data=f"admin_view:n:{mode}:next")
         )
         buttons.append(nav_row)
+
+    if submission is not None:
+        session_key = submission.get("session_key", "")
+        if session_key:
+            reviewed = bool(submission.get("reviewed_at"))
+            label_key = (
+                "admin.review_button_clear" if reviewed else "admin.review_button_mark"
+            )
+            action = "clear" if reviewed else "set"
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        get_message(label_key),
+                        callback_data=f"admin_view:r:{action}:{session_key}",
+                    )
+                ]
+            )
+
+    filter_text = get_message("admin.filter_hide_reviewed")
+    if state.get("filter_hide_reviewed"):
+        filter_text = f"✓ {filter_text}"
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                filter_text,
+                callback_data="admin_view:f:toggle",
+            )
+        ]
+    )
 
     mode_row = [
         InlineKeyboardButton(
@@ -1171,28 +1342,44 @@ async def _render_admin_application(
     context: ContextTypes.DEFAULT_TYPE, state: dict[str, Any]
 ) -> None:
     mode = state.get("mode", "time")
-    submissions = state["ordered"].get(mode, [])
-    if not submissions:
-        chat_id = state.get("chat_id")
-        if chat_id is not None:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=get_message("admin.no_applications"),
-            )
-        return
-
-    index = state["indexes"].get(mode, 0)
-    index = max(0, min(index, len(submissions) - 1))
-    state["indexes"][mode] = index
-    submission = submissions[index]
-
-    caption = _build_caption(state, submission, mode, index)
-    keyboard = _build_keyboard(state, mode, index)
+    submissions = state.get("ordered", {}).get(mode, [])
     chat_id = state.get("chat_id")
     if chat_id is None:
         logger.error("Admin view state missing chat_id")
         return
 
+    if not submissions:
+        keyboard = _build_keyboard(state, mode, 0, None)
+        text = get_message("admin.no_filtered_applications")
+        message_id = state.get("message_id")
+        if message_id:
+            try:
+                await context.bot.edit_message_caption(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    caption=text,
+                    reply_markup=keyboard,
+                )
+            except BadRequest as exc:
+                if "message is not modified" in str(exc).lower():
+                    return
+                raise
+        else:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard,
+            )
+        return
+
+    indexes = state.setdefault("indexes", {})
+    index = indexes.get(mode, 0)
+    index = max(0, min(index, len(submissions) - 1))
+    indexes[mode] = index
+    submission = submissions[index]
+
+    caption = _build_caption(state, submission, mode, index)
+    keyboard = _build_keyboard(state, mode, index, submission)
     message_id = state.get("message_id")
     photo_stream = _open_photo_stream(submission)
     try:
