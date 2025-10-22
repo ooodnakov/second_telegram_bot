@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 DEFAULT_MESSAGES_PATH = Path(__file__).resolve().parent / "messages.toml"
 
