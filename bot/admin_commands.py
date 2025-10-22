@@ -438,7 +438,26 @@ async def choose_broadcast_audience(
 
     data["audience"] = audience_key
 
-    await query.edit_message_text(get_message("admin.broadcast_message_prompt"))
+    _, count, audience_label = _resolve_broadcast_recipients(context, audience_key)
+    data["recipient_count"] = count
+    data["audience_label"] = audience_label
+
+    if count == 0:
+        await query.edit_message_text(get_message("admin.broadcast_no_recipients"))
+        logger.info(
+            "Broadcast cancelled due to zero recipients for audience: %s",
+            audience_label,
+        )
+        context.user_data.pop(BROADCAST_DATA_KEY, None)
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        get_message(
+            "admin.broadcast_message_prompt_with_count",
+            audience=audience_label,
+            count=count,
+        )
+    )
     return ADMIN_BROADCAST_MESSAGE
 
 
@@ -455,7 +474,20 @@ async def receive_broadcast_message(
 
     text = (message.text or "").strip()
     if not text:
-        await message.reply_text(get_message("admin.broadcast_message_prompt"))
+        if "recipient_count" in data:
+            audience_label = data.get(
+                "audience_label",
+                _audience_label(data.get("audience", BROADCAST_AUDIENCE_ALL)),
+            )
+            await message.reply_text(
+                get_message(
+                    "admin.broadcast_message_prompt_with_count",
+                    audience=audience_label,
+                    count=data.get("recipient_count", 0),
+                )
+            )
+        else:
+            await message.reply_text(get_message("admin.broadcast_message_prompt"))
         return ADMIN_BROADCAST_MESSAGE
 
     data["text"] = text
@@ -567,17 +599,24 @@ async def _prompt_broadcast_confirmation(
     """Send summary and confirmation buttons for the broadcast."""
 
     audience = data.get("audience", BROADCAST_AUDIENCE_ALL)
-    recipients = recipients_for_audience(context, audience)
+    recipients, count, audience_label = _resolve_broadcast_recipients(
+        context, audience
+    )
 
     if not recipients:
         await context.bot.send_message(
             chat_id=chat_id,
             text=get_message("admin.broadcast_no_recipients"),
         )
+        logger.info(
+            "Broadcast confirmation aborted due to zero recipients for audience: %s",
+            audience_label,
+        )
         context.user_data.pop(BROADCAST_DATA_KEY, None)
         return ConversationHandler.END
 
-    data["recipient_count"] = len(recipients)
+    data["recipient_count"] = count
+    data.setdefault("audience_label", audience_label)
 
     if data.get("mode") == "now":
         schedule_info = get_message("admin.broadcast_schedule_info_now")
@@ -589,8 +628,8 @@ async def _prompt_broadcast_confirmation(
 
     summary = get_message(
         "admin.broadcast_confirm",
-        audience=_audience_label(audience),
-        count=len(recipients),
+        audience=audience_label,
+        count=count,
         schedule_info=schedule_info,
     )
 
@@ -631,9 +670,15 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
 
     audience = data.get("audience", BROADCAST_AUDIENCE_ALL)
-    recipients = recipients_for_audience(context, audience)
+    recipients, count, audience_label = _resolve_broadcast_recipients(
+        context, audience
+    )
     if not recipients:
         await query.edit_message_text(get_message("admin.broadcast_no_recipients"))
+        logger.info(
+            "Broadcast cancelled due to zero recipients for audience: %s",
+            audience_label,
+        )
         context.user_data.pop(BROADCAST_DATA_KEY, None)
         return ConversationHandler.END
 
@@ -652,10 +697,10 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         "scheduled_at": scheduled_time.isoformat(),
         "status": status,
         "audience": audience,
-        "audience_label": _audience_label(audience),
+        "audience_label": audience_label,
         "text": data.get("text", ""),
         "sender_id": str(data.get("sender_id", "")),
-        "recipient_count": str(len(recipients)),
+        "recipient_count": str(count),
         "success_count": "0",
         "failed_count": "0",
         "completed_at": "",
@@ -1001,6 +1046,15 @@ def _build_caption(
     photo_count = sum(1 for path in _photo_paths(submission) if path.exists())
     photo_info = str(photo_count) if photo_count else get_message("admin.photo_missing")
 
+    revoked_at = submission.get("revoked_at", "")
+    if revoked_at:
+        status = get_message(
+            "admin.status_revoked",
+            revoked_at=html.escape(_format_timestamp(revoked_at)),
+        )
+    else:
+        status = get_message("admin.status_active")
+
     return get_message(
         "admin.view_caption",
         index=index + 1,
@@ -1008,6 +1062,7 @@ def _build_caption(
         mode=html.escape(mode_label),
         user_label=html.escape(user_label),
         created_at=html.escape(_format_timestamp(submission.get("created_at", ""))),
+        status=html.escape(status),
         position=html.escape(field("position")),
         condition=html.escape(field("condition")),
         size=html.escape(field("size")),
@@ -1081,6 +1136,14 @@ def _audience_label(audience: str) -> str:
     if audience == BROADCAST_AUDIENCE_RECENT:
         return get_message("admin.broadcast_audience_recent")
     return get_message("admin.broadcast_audience_all")
+
+
+def _resolve_broadcast_recipients(
+    context: ContextTypes.DEFAULT_TYPE, audience_key: str
+) -> tuple[set[int], int, str]:
+    recipients = recipients_for_audience(context, audience_key)
+    count = len(recipients)
+    return recipients, count, _audience_label(audience_key)
 
 
 def _scheduled_sort_key(record: dict[str, str]) -> float:

@@ -241,6 +241,53 @@ def list_broadcast_records(context: Any) -> list[dict[str, str]]:
     return broadcasts
 
 
+def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bool:
+    client = _get_client(context)
+    if client is None:
+        logger.warning(
+            "Valkey client missing while revoking application %s", session_key
+        )
+        return False
+
+    prefix = _get_prefix(context)
+    key = f"{prefix}:{session_key}"
+    record = load_application(client, key)
+    if not record:
+        logger.warning("Application %s not found for revocation", key)
+        return False
+
+    owner = record.get("user_id")
+    if owner != str(user_id):
+        logger.warning(
+            "User %s attempted to revoke application %s owned by %s",
+            user_id,
+            key,
+            owner,
+        )
+        return False
+
+    if record.get("revoked_at"):
+        logger.info("Application %s is already revoked", key)
+        return False
+
+    timestamp = datetime.now(UTC).isoformat()
+    if not timestamp:
+        logger.error("Failed to generate revocation timestamp for %s", key)
+        return False
+
+    try:
+        client.hset(  # type: ignore[attr-defined] - runtime Valkey client exposes hset
+            key,
+            mapping={"revoked_at": timestamp, "revoked_by": str(user_id)},
+        )
+    except ValkeyError:
+        logger.exception("Failed to mark application %s as revoked", key)
+        return False
+
+    logger.info("Application %s revoked by user %s", key, user_id)
+    return True
+
+
 __all__ = [
     "add_admin",
     "fetch_all_submissions",
@@ -254,6 +301,7 @@ __all__ = [
     "list_broadcast_records",
     "load_broadcast_record",
     "remove_admin",
+    "mark_application_revoked",
     "record_active_user",
     "recipients_for_audience",
     "save_broadcast_record",
