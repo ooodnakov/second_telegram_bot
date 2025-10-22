@@ -17,14 +17,38 @@ def stub_external_modules() -> Iterator[None]:
 
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
-        for name in (
-            "Bot",
-            "Update",
-            "InlineKeyboardButton",
-            "InlineKeyboardMarkup",
-            "InputMediaPhoto",
-        ):
-            setattr(telegram_module, name, type(name, (), {}))
+
+        class _InlineKeyboardButton:
+            def __init__(
+                self, text: str, callback_data: str | None = None, **kwargs
+            ) -> None:
+                self.text = text
+                self.callback_data = callback_data
+                self.kwargs = kwargs
+
+        class _InlineKeyboardMarkup:
+            def __init__(self, inline_keyboard) -> None:
+                self.inline_keyboard = inline_keyboard
+
+        class _InputMediaPhoto:
+            def __init__(
+                self,
+                *,
+                media,
+                caption: str | None = None,
+                parse_mode: str | None = None,
+                **kwargs,
+            ) -> None:
+                self.media = media
+                self.caption = caption
+                self.parse_mode = parse_mode
+                self.kwargs = kwargs
+
+        telegram_module.Bot = type("Bot", (), {})
+        telegram_module.Update = type("Update", (), {})
+        telegram_module.InlineKeyboardButton = _InlineKeyboardButton
+        telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
+        telegram_module.InputMediaPhoto = _InputMediaPhoto
         monkeypatch.setitem(sys.modules, "telegram", telegram_module)
 
         telegram_error_module = types.ModuleType("telegram.error")
