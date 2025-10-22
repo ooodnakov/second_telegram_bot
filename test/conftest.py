@@ -32,8 +32,18 @@ def stub_external_modules() -> Iterator[None]:
                 self.inline_keyboard = inline_keyboard or []
 
         class _InputMediaPhoto:
-            def __init__(self, media: object | None = None):
+            def __init__(
+                self,
+                media: object | None = None,
+                *,
+                caption: str | None = None,
+                parse_mode: str | None = None,
+                **kwargs,
+            ):
                 self.media = media
+                self.caption = caption
+                self.parse_mode = parse_mode
+                self.extra = kwargs
 
         telegram_module.InlineKeyboardButton = _InlineKeyboardButton
         telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
