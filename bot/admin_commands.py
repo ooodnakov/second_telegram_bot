@@ -39,6 +39,7 @@ from bot.constants import (
 from bot.logging import logger
 from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
+from telegram.constants import ChatType
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
 
@@ -88,18 +89,34 @@ async def _resolve_admin_identifier(
 
     try:
         chat = await bot.get_chat(username)
+    except BadRequest as exc:
+        message = (getattr(exc, "message", None) or str(exc) or "").strip()
+        if "chat not found" in message.lower() or "user not found" in message.lower():
+            logger.info("Failed to resolve admin identifier %s: %s", username, message)
+            return None, "not_found", username
+        logger.warning(
+            "Bad request while resolving admin identifier %s: %s", username, message
+        )
+        return None, "lookup_failed", username
     except TelegramError as exc:  # pragma: no cover - network errors
-        logger.info("Failed to resolve admin identifier %s: %s", username, exc)
-        return None, "not_found", username
+        logger.error("Telegram error resolving admin identifier %s: %s", username, exc)
+        return None, "lookup_failed", username
 
     chat_id = getattr(chat, "id", None)
-    chat_type = str(getattr(chat, "type", "private")).lower()
-    if chat_id is None or chat_type != "private":
+    chat_type = getattr(chat, "type", None)
+    if isinstance(chat_type, ChatType):
+        chat_type_str = chat_type.value
+        is_private = chat_type is ChatType.PRIVATE
+    else:
+        chat_type_str = str(chat_type)
+        is_private = chat_type_str.lower() == "private"
+
+    if chat_id is None or not is_private:
         logger.info(
             "Resolved identifier %s to unsupported chat %s (type %s)",
             username,
             chat_id,
-            chat_type,
+            chat_type_str,
         )
         return None, "not_found", username
 
@@ -267,6 +284,8 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await message.reply_text(
                 get_message("admin.user_lookup_failed", identifier=identifier or text)
             )
+        elif error == "lookup_failed":
+            await message.reply_text(get_message("admin.user_lookup_error"))
         else:
             await message.reply_text(get_message("admin.add_invalid"))
         return ADMIN_ADD_ADMIN_WAIT_ID
@@ -321,6 +340,8 @@ async def receive_remove_admin_id(
             await message.reply_text(
                 get_message("admin.user_lookup_failed", identifier=identifier or text)
             )
+        elif error == "lookup_failed":
+            await message.reply_text(get_message("admin.user_lookup_error"))
         else:
             await message.reply_text(get_message("admin.add_invalid"))
         return ADMIN_REMOVE_ADMIN_WAIT_ID

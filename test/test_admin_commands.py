@@ -35,7 +35,7 @@ def test_receive_admin_id_accepts_username(bot_modules) -> None:
     class ResolvingBot:
         async def get_chat(self, identifier: str) -> SimpleNamespace:
             assert identifier == "@new_admin"
-            return SimpleNamespace(id=777, type="private")
+            return SimpleNamespace(id=777, type=admin_commands.ChatType.PRIVATE)
 
     context = _build_context(bot_modules, ResolvingBot())
     message = DummyMessage("@new_admin")
@@ -59,7 +59,7 @@ def test_receive_admin_id_reports_unknown_username(bot_modules) -> None:
 
     class FailingBot:
         async def get_chat(self, identifier: str) -> SimpleNamespace:
-            raise admin_commands.TelegramError("not found")
+            raise admin_commands.BadRequest("Chat not found")
 
     context = _build_context(bot_modules, FailingBot())
     message = DummyMessage("@missing_user")
@@ -76,4 +76,26 @@ def test_receive_admin_id_reports_unknown_username(bot_modules) -> None:
             "admin.user_lookup_failed", identifier="@missing_user"
         )
     ]
+    assert admin_module.get_admins(context) == set()
+
+
+def test_receive_admin_id_reports_lookup_failure(bot_modules) -> None:
+    admin_commands = bot_modules.admin_commands
+    admin_module = bot_modules.admin
+
+    class ErrorBot:
+        async def get_chat(self, identifier: str) -> SimpleNamespace:
+            raise admin_commands.TelegramError("Gateway Timeout")
+
+    context = _build_context(bot_modules, ErrorBot())
+    message = DummyMessage("@flaky_user")
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
+
+    async def invoke() -> None:
+        result = await admin_commands.receive_admin_id(update, context)
+        assert result == admin_commands.ADMIN_ADD_ADMIN_WAIT_ID
+
+    asyncio.run(invoke())
+
+    assert message.replies == [admin_commands.get_message("admin.user_lookup_error")]
     assert admin_module.get_admins(context) == set()
