@@ -17,35 +17,34 @@ def stub_external_modules() -> Iterator[None]:
 
     if "telegram" not in sys.modules:
         telegram_module = types.ModuleType("telegram")
+        telegram_module.Bot = type("Bot", (), {})
+        telegram_module.Update = type("Update", (), {})
 
         class _InlineKeyboardButton:
             def __init__(
-                self, text: str, callback_data: str | None = None, **kwargs
-            ) -> None:
+                self, text: str | None = None, callback_data: str | None = None
+            ):
                 self.text = text
                 self.callback_data = callback_data
-                self.kwargs = kwargs
 
         class _InlineKeyboardMarkup:
-            def __init__(self, inline_keyboard) -> None:
-                self.inline_keyboard = inline_keyboard
+            def __init__(self, inline_keyboard: list[list[object]] | None = None):
+                self.inline_keyboard = inline_keyboard or []
 
         class _InputMediaPhoto:
             def __init__(
                 self,
+                media: object | None = None,
                 *,
-                media,
                 caption: str | None = None,
                 parse_mode: str | None = None,
                 **kwargs,
-            ) -> None:
+            ):
                 self.media = media
                 self.caption = caption
                 self.parse_mode = parse_mode
-                self.kwargs = kwargs
+                self.extra = kwargs
 
-        telegram_module.Bot = type("Bot", (), {})
-        telegram_module.Update = type("Update", (), {})
         telegram_module.InlineKeyboardButton = _InlineKeyboardButton
         telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
         telegram_module.InputMediaPhoto = _InputMediaPhoto
@@ -169,7 +168,9 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
     admin_commands_module = importlib.reload(
         importlib.import_module("bot.admin_commands")
     )
+    editing_module = importlib.reload(importlib.import_module("bot.editing"))
     constants_module = importlib.reload(importlib.import_module("bot.constants"))
+    commands_module = importlib.reload(importlib.import_module("bot.commands"))
     return SimpleNamespace(
         logging=logging_module,
         config=config_module,
@@ -177,5 +178,7 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
         workflow=workflow_module,
         admin=admin_module,
         admin_commands=admin_commands_module,
+        editing=editing_module,
         constants=constants_module,
+        commands=commands_module,
     )

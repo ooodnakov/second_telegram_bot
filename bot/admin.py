@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from bot.constants import UTC
 from bot.logging import logger
@@ -288,6 +288,66 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
     return True
 
 
+def update_application_fields(
+    context: Any, session_key: str, user_id: int, **fields: Any
+) -> bool:
+    """Persist updates to an application owned by the current user."""
+
+    if not fields:
+        logger.debug(
+            "No fields provided for application %s update; treating as success",
+            session_key,
+        )
+        return True
+
+    client = _get_client(context)
+    if client is None:
+        logger.warning(
+            "Valkey client missing while updating application %s", session_key
+        )
+        return False
+
+    prefix = _get_prefix(context)
+    key = f"{prefix}:{session_key}"
+    record = load_application(client, key)
+    if not record:
+        logger.warning("Application %s not found for update", key)
+        return False
+
+    owner = record.get("user_id")
+    if owner != str(user_id):
+        logger.warning(
+            "User %s attempted to update application %s owned by %s",
+            user_id,
+            key,
+            owner,
+        )
+        return False
+
+    serialized: dict[str, str] = {}
+    for field, value in fields.items():
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            serialized[field] = ",".join(str(item) for item in value)
+        elif value is None:
+            serialized[field] = ""
+        else:
+            serialized[field] = str(value)
+
+    try:
+        client.hset(key, mapping=serialized)  # type: ignore[attr-defined]
+    except ValkeyError:
+        logger.exception("Failed to update application %s", key)
+        return False
+
+    logger.info(
+        "Application %s updated by user %s with fields %s",
+        key,
+        user_id,
+        sorted(serialized.keys()),
+    )
+    return True
+
+
 def mark_application_reviewed(
     context: Any, session_key: str, reviewer_id: int
 ) -> str | None:
@@ -385,4 +445,5 @@ __all__ = [
     "recipients_for_audience",
     "save_broadcast_record",
     "update_broadcast_record",
+    "update_application_fields",
 ]

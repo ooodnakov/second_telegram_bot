@@ -30,6 +30,7 @@ from bot.commands import (
     new,
     paginate_list,
     revoke_application,
+    show_application_detail,
     start,
 )
 from bot.config import create_valkey_client, load_config
@@ -44,12 +45,28 @@ from bot.constants import (
     CONDITION,
     CONTACTS,
     DESCRIPTION,
+    EDIT_CONDITION,
+    EDIT_DESCRIPTION,
+    EDIT_PHOTOS,
+    EDIT_POSITION,
     MATERIAL,
     PHOTOS,
     POSITION,
     PRICE,
     SIZE,
     SKIP_KEYWORD_PATTERN,
+)
+from bot.editing import (
+    cancel_editing,
+    finalize_photo_upload,
+    receive_condition_choice,
+    receive_description,
+    receive_photo_upload,
+    receive_position,
+    start_edit_condition,
+    start_edit_description,
+    start_edit_photos,
+    start_edit_position,
 )
 from bot.logging import logger
 from bot.workflow import (
@@ -126,7 +143,10 @@ def main() -> None:
     app.add_handler(CommandHandler("admins", show_admin_roster))
     app.add_handler(CommandHandler("broadcast_history", show_broadcast_history))
     app.add_handler(CommandHandler("scheduled", show_scheduled_broadcasts))
-    app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:\d+:\d+$"))
+    app.add_handler(
+        CallbackQueryHandler(show_application_detail, pattern=r"^list:view:")
+    )
+    app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:page:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
     app.add_handler(
         CallbackQueryHandler(
@@ -140,6 +160,43 @@ def main() -> None:
     )
     app.add_handler(
         CallbackQueryHandler(navigate_applications, pattern=r"^admin_view:")
+    )
+
+    edit_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(start_edit_position, pattern=r"^edit:position:"),
+            CallbackQueryHandler(start_edit_description, pattern=r"^edit:description:"),
+            CallbackQueryHandler(start_edit_condition, pattern=r"^edit:condition:"),
+            CallbackQueryHandler(start_edit_photos, pattern=r"^edit:photos:"),
+        ],
+        states={
+            EDIT_POSITION: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    receive_position,
+                )
+            ],
+            EDIT_DESCRIPTION: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    receive_description,
+                )
+            ],
+            EDIT_CONDITION: [
+                CallbackQueryHandler(
+                    receive_condition_choice,
+                    pattern=r"^edit_condition:set:",
+                )
+            ],
+            EDIT_PHOTOS: [
+                MessageHandler(filters.PHOTO, receive_photo_upload),
+                MessageHandler(
+                    filters.Regex(SKIP_KEYWORD_PATTERN), finalize_photo_upload
+                ),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_editing)],
+        per_message=False,
     )
 
     add_admin_conv = ConversationHandler(
@@ -199,6 +256,7 @@ def main() -> None:
     app.add_handler(add_admin_conv)
     app.add_handler(remove_admin_conv)
     app.add_handler(broadcast_conv)
+    app.add_handler(edit_conv)
     app.add_error_handler(error_handler)
     logger.info("Handlers registered; starting polling")
     app.run_polling()
