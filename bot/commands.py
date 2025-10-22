@@ -108,7 +108,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_text(text, parse_mode="Markdown")
     except BadRequest as exc:
-        if "can't parse entities" in str(exc).lower():
+        _MARKDOWN_PARSE_ERROR = "can't parse entities"
+        if _MARKDOWN_PARSE_ERROR in str(exc).lower():
             logger.warning(
                 "Failed to send help text with Markdown for user {}: {}", user.id, exc
             )
