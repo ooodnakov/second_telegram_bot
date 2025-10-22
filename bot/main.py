@@ -7,6 +7,8 @@ from bot.admin_commands import (
     choose_broadcast_audience,
     confirm_broadcast,
     handle_broadcast_decision,
+    navigate_application_photo_next,
+    navigate_application_photo_prev,
     navigate_applications,
     receive_admin_id,
     receive_broadcast_message,
@@ -146,6 +148,16 @@ def main() -> None:
     )
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:page:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
+    app.add_handler(
+        CallbackQueryHandler(
+            navigate_application_photo_prev, pattern=r"^admin_app_photo_prev:"
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            navigate_application_photo_next, pattern=r"^admin_app_photo_next:"
+        )
+    )
     app.add_handler(
         CallbackQueryHandler(navigate_applications, pattern=r"^admin_view:")
     )
