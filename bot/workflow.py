@@ -20,6 +20,7 @@ from bot.constants import (
     UTC,
 )
 from bot.logging import logger
+from bot.media_storage import get_media_storage
 from bot.messages import get_message
 from bot.storage import get_application_store
 from telegram import (
@@ -106,28 +107,30 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_message("general.photo_required"))
         return PHOTOS
 
-    photo_file_id = update.message.photo[-1].file_id
-    session_dir: Path | None = user_data.get("session_dir")
-    if session_dir is None:
-        logger.error("Session directory missing for user {}", user.id)
+    storage = get_media_storage(context)
+    session_key = user_data.get("session_key")
+    if not session_key:
+        logger.error("Session key missing for user {} during photo upload", user.id)
         await update.message.reply_text(get_message("general.photo_save_error"))
         return ConversationHandler.END
 
-    photo_index = len(user_data["photos"]) + 1
+    session = storage.get_session(str(session_key))
+    photo_index = len(user_data.get("photos", [])) + 1
 
-    telegram_file = await context.bot.get_file(photo_file_id)
+    telegram_file = await context.bot.get_file(update.message.photo[-1].file_id)
     file_suffix = Path(telegram_file.file_path or "").suffix or ".jpg"
     filename = f"photo_{photo_index:02d}{file_suffix}"
-    saved_path = session_dir / filename
-    await telegram_file.download_to_drive(custom_path=str(saved_path))
+    target_path = storage.allocate_path(session, filename)
+    await telegram_file.download_to_drive(custom_path=str(target_path))
+    handle = storage.finalize_upload(session, target_path)
     logger.info(
-        "Saved photo {} for user {} to {}",
+        "Saved photo {} for user {} as {}",
         photo_index,
         user.id,
-        saved_path,
+        handle,
     )
 
-    photos = store.append_photo(user.id, saved_path)
+    photos = store.append_photo(user.id, handle)
     user_data["photos"] = photos
 
     count = len(photos)
@@ -272,18 +275,17 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     text = "\n".join(text_lines)
 
-    photos: list[Path] = [Path(photo) for photo in user_data.get("photos", [])]
-    user_data["photos"] = photos
-    logger.debug("User {} submission includes {} photos", user.id, len(photos))
+    photo_handles: list[str] = list(user_data.get("photos", []))
+    logger.debug("User {} submission includes {} photos", user.id, len(photo_handles))
 
     chat = update.effective_chat
     chat_id = chat.id if chat is not None else user.id
-    await _send_submission_photos(context.bot, chat_id, photos)
+    await _send_submission_photos(context, chat_id, photo_handles)
 
     await update.message.reply_text(text, parse_mode="Markdown")
 
     _persist_application(update, context, user_data)
-    await _forward_to_moderators(context, text, photos)
+    await _forward_to_moderators(context, text, photo_handles)
     await update.message.reply_text(
         get_message("workflow.submission_received"), parse_mode="Markdown"
     )
@@ -346,7 +348,7 @@ async def _send_photo_prompt(
 async def _forward_to_moderators(
     context: ContextTypes.DEFAULT_TYPE,
     text: str,
-    photos: list[Path],
+    photo_handles: list[str],
 ) -> None:
     chat_ids: list[int] = context.application.bot_data.get("moderator_chat_ids") or []
     if not chat_ids:
@@ -355,7 +357,7 @@ async def _forward_to_moderators(
 
     for chat_id in chat_ids:
         try:
-            await _send_submission_photos(context.bot, chat_id, photos)
+            await _send_submission_photos(context, chat_id, photo_handles)
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=text,
@@ -369,11 +371,13 @@ async def _forward_to_moderators(
 
 
 async def _send_submission_photos(
-    bot: Bot,
+    context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
-    photos: list[Path],
+    photo_handles: list[str],
 ) -> None:
-    existing_photos = [photo_path for photo_path in photos if photo_path.exists()]
+    storage = get_media_storage(context)
+    cached_paths = storage.cache_photos(photo_handles)
+    existing_photos = [photo_path for photo_path in cached_paths if photo_path.exists()]
     if not existing_photos:
         logger.debug("No existing photos to send to chat {}", chat_id)
         return
@@ -383,6 +387,7 @@ async def _send_submission_photos(
         len(existing_photos),
         chat_id,
     )
+    bot = context.bot
     if len(existing_photos) > 1:
         media_group: list[InputMediaPhoto] = []
         open_files = []
@@ -466,7 +471,7 @@ def _persist_application(
 
     session_key = user_data.get("session_key")
     session_dir: Path | None = user_data.get("session_dir")
-    photos = [str(Path(photo_path)) for photo_path in user_data.get("photos", [])]
+    photos = [str(photo_path) for photo_path in user_data.get("photos", [])]
 
     record = {
         "session_key": session_key or uuid4().hex,

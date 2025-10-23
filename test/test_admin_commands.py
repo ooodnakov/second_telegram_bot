@@ -104,13 +104,13 @@ def _patched_telegram_types(admin_commands) -> None:
         admin_commands.InputMediaPhoto = original_media  # type: ignore[assignment]
 
 
-def _build_context(bot_modules, bot) -> SimpleNamespace:
-    storage = bot_modules.storage
-    client = storage.InMemoryValkey()
+def _build_context(bot_modules, bot, storage) -> SimpleNamespace:
+    client = bot_modules.storage.InMemoryValkey()
     bot_data = {
         "valkey_client": client,
         "valkey_prefix": "testbot",
         "super_admin_ids": [1],
+        "media_storage": storage,
     }
     return SimpleNamespace(
         application=SimpleNamespace(bot_data=bot_data),
@@ -119,7 +119,19 @@ def _build_context(bot_modules, bot) -> SimpleNamespace:
     )
 
 
-def test_receive_admin_id_accepts_username(bot_modules) -> None:
+def _make_minio_storage(bot_modules, tmp_path):
+    client = bot_modules.media_storage.Minio(
+        "minio", access_key=None, secret_key=None, secure=False
+    )
+    storage = bot_modules.media_storage.MinioMediaStorage(
+        client,
+        bucket="admin-bucket",
+        cache_dir=tmp_path / "cache",
+    )
+    return client, storage
+
+
+def test_receive_admin_id_accepts_username(bot_modules, tmp_path) -> None:
     admin_commands = bot_modules.admin_commands
     admin_module = bot_modules.admin
 
@@ -128,7 +140,8 @@ def test_receive_admin_id_accepts_username(bot_modules) -> None:
             assert identifier == "@new_admin"
             return SimpleNamespace(id=777, type=admin_commands.ChatType.PRIVATE)
 
-    context = _build_context(bot_modules, ResolvingBot())
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    context = _build_context(bot_modules, ResolvingBot(), storage)
     message = DummyMessage("@new_admin")
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
 
@@ -145,7 +158,7 @@ def test_receive_admin_id_accepts_username(bot_modules) -> None:
     assert 777 in admin_module.get_admins(context)
 
 
-def test_receive_admin_id_reports_unknown_username(bot_modules) -> None:
+def test_receive_admin_id_reports_unknown_username(bot_modules, tmp_path) -> None:
     admin_commands = bot_modules.admin_commands
     admin_module = bot_modules.admin
 
@@ -153,7 +166,8 @@ def test_receive_admin_id_reports_unknown_username(bot_modules) -> None:
         async def get_chat(self, identifier: str) -> SimpleNamespace:
             raise admin_commands.BadRequest("Chat not found")
 
-    context = _build_context(bot_modules, FailingBot())
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    context = _build_context(bot_modules, FailingBot(), storage)
     message = DummyMessage("@missing_user")
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
 
@@ -172,15 +186,17 @@ def test_receive_admin_id_reports_unknown_username(bot_modules) -> None:
     assert admin_module.get_admins(context) == set()
 
 
-def test_receive_admin_id_reports_lookup_failure(bot_modules) -> None:
+def test_receive_admin_id_reports_lookup_failure(bot_modules, tmp_path) -> None:
     admin_commands = bot_modules.admin_commands
     admin_module = bot_modules.admin
+
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
 
     class ErrorBot:
         async def get_chat(self, identifier: str) -> SimpleNamespace:
             raise admin_commands.TelegramError("Gateway Timeout")
 
-    context = _build_context(bot_modules, ErrorBot())
+    context = _build_context(bot_modules, ErrorBot(), storage)
     message = DummyMessage("@flaky_user")
     update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
 
@@ -194,11 +210,15 @@ def test_receive_admin_id_reports_lookup_failure(bot_modules) -> None:
     assert admin_module.get_admins(context) == set()
 
 
-def _build_submission_with_photos(tmp_path, session_key: str) -> dict[str, str]:
-    photo_one = tmp_path / "one.jpg"
-    photo_two = tmp_path / "two.jpg"
-    photo_one.write_bytes(b"photo-one")
-    photo_two.write_bytes(b"photo-two")
+def _build_submission_with_photos(storage, session_key: str) -> dict[str, str]:
+    session = storage.get_session(session_key)
+    first_path = storage.allocate_path(session, "one.jpg")
+    second_path = storage.allocate_path(session, "two.jpg")
+    first_path.parent.mkdir(parents=True, exist_ok=True)
+    first_path.write_bytes(b"photo-one")
+    second_path.write_bytes(b"photo-two")
+    handle_one = storage.finalize_upload(session, first_path)
+    handle_two = storage.finalize_upload(session, second_path)
     return {
         "session_key": session_key,
         "user_id": "123",
@@ -210,18 +230,19 @@ def _build_submission_with_photos(tmp_path, session_key: str) -> dict[str, str]:
         "description": "Warm jacket",
         "price": "1000",
         "contacts": "@seller",
-        "photos": f"{photo_one},{photo_two}",
+        "photos": f"{handle_one},{handle_two}",
     }
 
 
 def test_admin_photo_navigation_advances_photo(bot_modules, tmp_path) -> None:
     admin_commands = bot_modules.admin_commands
     session_key = "session-advance"
-    submission = _build_submission_with_photos(tmp_path, session_key)
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    submission = _build_submission_with_photos(storage, session_key)
     state = admin_commands._build_view_state([submission])
     state["chat_id"] = 555
     bot = RecordingBot()
-    context = _build_context(bot_modules, bot)
+    context = _build_context(bot_modules, bot, storage)
     context.user_data[admin_commands.ADMIN_VIEW_STATE_KEY] = state
 
     async def invoke() -> None:
@@ -266,14 +287,55 @@ def test_admin_photo_navigation_advances_photo(bot_modules, tmp_path) -> None:
     asyncio.run(invoke())
 
 
+def test_admin_navigation_uses_cache_with_minio(bot_modules, tmp_path) -> None:
+    admin_commands = bot_modules.admin_commands
+    minio_client, storage = _make_minio_storage(bot_modules, tmp_path)
+    submission = _build_submission_with_photos(storage, "session-cache")
+    state = admin_commands._build_view_state([submission])
+    state["chat_id"] = 888
+    bot = RecordingBot()
+    context = _build_context(bot_modules, bot, storage)
+    context.user_data[admin_commands.ADMIN_VIEW_STATE_KEY] = state
+
+    cache_root = tmp_path / "cache"
+    for handle in submission["photos"].split(","):
+        cached_file = cache_root / handle
+        if cached_file.exists():
+            cached_file.unlink()
+
+    downloads: list[str] = []
+    original_fget = minio_client.fget_object
+
+    def _tracking_fget(bucket: str, object_name: str, file_path: str) -> None:
+        downloads.append(object_name)
+        return original_fget(bucket, object_name, file_path)
+
+    minio_client.fget_object = _tracking_fget  # type: ignore[assignment]
+
+    async def invoke() -> None:
+        await admin_commands._render_admin_application(context, state)
+        query = DummyQuery("admin_app_photo_next:session-cache")
+        update = SimpleNamespace(callback_query=query)
+        await admin_commands.navigate_application_photo_next(update, context)
+        await admin_commands.navigate_application_photo_next(update, context)
+
+    try:
+        asyncio.run(invoke())
+    finally:
+        minio_client.fget_object = original_fget  # type: ignore[assignment]
+
+    assert len(downloads) == 2
+
+
 def test_admin_photo_navigation_wraps_previous(bot_modules, tmp_path) -> None:
     admin_commands = bot_modules.admin_commands
     session_key = "session-wrap"
-    submission = _build_submission_with_photos(tmp_path, session_key)
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    submission = _build_submission_with_photos(storage, session_key)
     state = admin_commands._build_view_state([submission])
     state["chat_id"] = 777
     bot = RecordingBot()
-    context = _build_context(bot_modules, bot)
+    context = _build_context(bot_modules, bot, storage)
     context.user_data[admin_commands.ADMIN_VIEW_STATE_KEY] = state
 
     async def invoke() -> None:

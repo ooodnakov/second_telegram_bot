@@ -75,13 +75,13 @@ class DummyUserMessage:
         self.replies.append(text)
 
 
-def _build_context(bot_modules, bot) -> tuple[object, SimpleNamespace]:
-    storage = bot_modules.storage
-    client = storage.InMemoryValkey()
+def _build_context(bot_modules, bot, storage) -> tuple[object, SimpleNamespace]:
+    client = bot_modules.storage.InMemoryValkey()
     bot_data = {
         "valkey_client": client,
         "valkey_prefix": "testbot",
         "moderator_chat_ids": [],
+        "media_storage": storage,
     }
     context = SimpleNamespace(
         application=SimpleNamespace(bot_data=bot_data),
@@ -91,17 +91,38 @@ def _build_context(bot_modules, bot) -> tuple[object, SimpleNamespace]:
     return client, context
 
 
+def _make_local_storage(bot_modules, tmp_path):
+    return bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+
+
+def _make_minio_storage(bot_modules, tmp_path):
+    client = bot_modules.media_storage.Minio(
+        "minio", access_key=None, secret_key=None, secure=False
+    )
+    storage = bot_modules.media_storage.MinioMediaStorage(
+        client,
+        bucket="test-bucket",
+        cache_dir=tmp_path / "cache",
+    )
+    return client, storage
+
+
 def _create_submission(
     client,
     prefix: str,
     session_key: str,
     user_id: int,
-    session_dir: Path,
-    photo_path: Path,
+    storage,
+    *,
+    filename: str = "photo.jpg",
     position: str = "Coat",
-) -> None:
-    session_dir.mkdir(parents=True, exist_ok=True)
-    photo_path.write_bytes(b"photo")
+    payload: bytes = b"photo",
+) -> str:
+    session = storage.get_session(session_key)
+    target_path = storage.allocate_path(session, filename)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(payload)
+    handle = storage.finalize_upload(session, target_path)
     record = {
         "session_key": session_key,
         "user_id": str(user_id),
@@ -109,23 +130,23 @@ def _create_submission(
         "condition": "Used",
         "description": "Warm",
         "created_at": "2023-01-01T00:00:00",
-        "photos": str(photo_path),
-        "session_dir": str(session_dir),
+        "photos": handle,
+        "session_dir": str(session.directory or ""),
     }
     key = f"{prefix}:{session_key}"
     client.hset(key, mapping=record)
     client.sadd(f"{prefix}:applications", key)
+    return handle
 
 
 def test_list_applications_renders_grid(tmp_path, bot_modules):
     async def run() -> None:
         commands = bot_modules.commands
         bot = DummyBot(tmp_path)
-        client, context = _build_context(bot_modules, bot)
+        storage = _make_local_storage(bot_modules, tmp_path)
+        client, context = _build_context(bot_modules, bot, storage)
 
-        session_dir = tmp_path / "media" / "s1"
-        photo_path = session_dir / "photo.jpg"
-        _create_submission(client, "testbot", "s1", 100, session_dir, photo_path)
+        _create_submission(client, "testbot", "s1", 100, storage)
 
         message = DummyMessage(chat_id=100)
         update = SimpleNamespace(
@@ -137,11 +158,40 @@ def test_list_applications_renders_grid(tmp_path, bot_modules):
         assert result is commands.ConversationHandler.END
 
         assert message.replies
-        text, markup = message.replies[0]
-        assert text == commands.get_message("list.instructions")
+        text_value, markup = message.replies[0]
+        assert text_value == commands.get_message("list.instructions")
         assert markup is not None
         assert markup.inline_keyboard
         assert markup.inline_keyboard[0][0].callback_data.startswith("list:view:")
+
+    asyncio.run(run())
+
+
+def test_list_applications_renders_grid_minio(tmp_path, bot_modules):
+    async def run() -> None:
+        commands = bot_modules.commands
+        bot = DummyBot(tmp_path)
+        _minio_client, storage = _make_minio_storage(bot_modules, tmp_path)
+        client, context = _build_context(bot_modules, bot, storage)
+
+        _create_submission(client, "testbot", "s1", 100, storage)
+
+        message = DummyMessage(chat_id=100)
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=100),
+        )
+
+        result = await commands.list_applications(update, context)
+        assert result is commands.ConversationHandler.END
+
+        assert message.replies
+        text_value, markup = message.replies[0]
+        assert text_value == commands.get_message("list.instructions")
+        assert markup is not None
+        assert markup.inline_keyboard
+        assert markup.inline_keyboard[0][0].callback_data.startswith("list:view:")
+        assert (tmp_path / "cache" / "s1" / "photo.jpg").exists()
 
     asyncio.run(run())
 
@@ -150,19 +200,17 @@ def test_paginate_list_updates_message(tmp_path, bot_modules):
     async def run() -> None:
         commands = bot_modules.commands
         bot = DummyBot(tmp_path)
-        client, context = _build_context(bot_modules, bot)
+        storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+        client, context = _build_context(bot_modules, bot, storage)
 
         for idx in range(2):
             session = f"s{idx + 1}"
-            session_dir = tmp_path / "media" / session
-            photo_path = session_dir / "photo.jpg"
             _create_submission(
                 client,
                 "testbot",
                 session,
                 100,
-                session_dir,
-                photo_path,
+                storage,
                 position=f"Item {idx}",
             )
 
@@ -188,11 +236,10 @@ def test_show_application_detail_sends_photos(tmp_path, bot_modules):
     async def run() -> None:
         commands = bot_modules.commands
         bot = DummyBot(tmp_path)
-        client, context = _build_context(bot_modules, bot)
+        storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+        client, context = _build_context(bot_modules, bot, storage)
 
-        session_dir = tmp_path / "media" / "session"
-        photo_path = session_dir / "photo.jpg"
-        _create_submission(client, "testbot", "session", 100, session_dir, photo_path)
+        _create_submission(client, "testbot", "session", 100, storage)
 
         list_message = DummyMessage(chat_id=100)
         await commands.list_applications(
@@ -225,11 +272,10 @@ def test_show_application_detail_sends_photos(tmp_path, bot_modules):
 async def _prepare_detail_view(tmp_path, bot_modules):
     commands = bot_modules.commands
     bot = DummyBot(tmp_path)
-    client, context = _build_context(bot_modules, bot)
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    client, context = _build_context(bot_modules, bot, storage)
 
-    session_dir = tmp_path / "media" / "session"
-    photo_path = session_dir / "photo.jpg"
-    _create_submission(client, "testbot", "session", 100, session_dir, photo_path)
+    _create_submission(client, "testbot", "session", 100, storage)
 
     await commands.list_applications(
         SimpleNamespace(

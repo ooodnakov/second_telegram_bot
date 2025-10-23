@@ -39,6 +39,7 @@ from bot.constants import (
     UTC,
 )
 from bot.logging import logger
+from bot.media_storage import get_media_storage
 from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ChatType
@@ -370,7 +371,7 @@ async def _navigate_application_photo(
         )
         return
 
-    photo_paths = _available_photo_paths(submission)
+    photo_paths = _available_photo_paths(context, submission)
     total = len(photo_paths)
     if total <= 1:
         await query.answer()
@@ -1389,27 +1390,40 @@ def _build_keyboard(
     return InlineKeyboardMarkup(buttons)
 
 
-def _photo_paths(submission: dict[str, str]) -> list[Path]:
+def _photo_handles(submission: dict[str, str]) -> list[str]:
     raw = submission.get("photos", "")
-    paths: list[Path] = []
+    handles: list[str] = []
     for chunk in raw.split(","):
         candidate = chunk.strip()
         if candidate:
-            paths.append(Path(candidate))
-    return paths
+            handles.append(candidate)
+    return handles
 
 
-def _available_photo_paths(submission: dict[str, str]) -> list[Path]:
-    return [path for path in _photo_paths(submission) if path.exists()]
+def _photo_paths(
+    context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
+) -> list[Path]:
+    storage = get_media_storage(context)
+    handles = _photo_handles(submission)
+    return storage.cache_photos(handles)
+
+
+def _available_photo_paths(
+    context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
+) -> list[Path]:
+    return [path for path in _photo_paths(context, submission) if path.exists()]
 
 
 def _open_photo_stream(
+    context: ContextTypes.DEFAULT_TYPE,
     submission: dict[str, str],
     photo_index: int = 0,
     photo_paths: Sequence[Path] | None = None,
 ) -> BytesIO | Any:
     paths = (
-        photo_paths if photo_paths is not None else _available_photo_paths(submission)
+        photo_paths
+        if photo_paths is not None
+        else _available_photo_paths(context, submission)
     )
     if paths:
         stream = paths[photo_index].open("rb")
@@ -1533,7 +1547,7 @@ async def _render_admin_application(
         session_key not in photo_indexes or session_key != previous_session_key
     ):
         photo_indexes[session_key] = 0
-    photo_paths = _available_photo_paths(submission)
+    photo_paths = _available_photo_paths(context, submission)
     photo_total = len(photo_paths)
     if session_key:
         photo_index = photo_indexes.get(session_key, 0)
@@ -1560,7 +1574,7 @@ async def _render_admin_application(
                 )
         state["empty_message_id"] = None
 
-    photo_stream = _open_photo_stream(submission, photo_index, photo_paths)
+    photo_stream = _open_photo_stream(context, submission, photo_index, photo_paths)
     try:
         if message_id:
             media = InputMediaPhoto(

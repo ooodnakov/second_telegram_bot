@@ -31,11 +31,17 @@ valkey_prefix = demo_prefix
     assert config["valkey"]["password"] == "secret"
     assert config["valkey"]["prefix"] == "demo_prefix"
 
+    storage = config["storage"]
+    assert storage["backend"] == "local"
+    assert Path(storage["local_root"]).name == "media"
+    assert Path(storage["cache_dir"]).name == "media"
+
     messages = extract_messages(events)
     assert any(
         "Configuration loaded for 2 moderators" in message for message in messages
     )
     assert any("Valkey host localhost:6379" in message for message in messages)
+    assert any("Media storage backend configured" in message for message in messages)
 
 
 def test_create_valkey_client_success(monkeypatch, bot_modules) -> None:

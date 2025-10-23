@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import html
 from datetime import datetime
-from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from bot.admin import (
     fetch_user_submissions,
@@ -15,8 +13,9 @@ from bot.admin import (
     mark_application_revoked,
     record_active_user,
 )
-from bot.constants import LIST_PAGE_SIZE, MEDIA_ROOT, MOSCOW_TZ, POSITION, UTC
+from bot.constants import LIST_PAGE_SIZE, MOSCOW_TZ, POSITION, UTC
 from bot.logging import logger
+from bot.media_storage import get_media_storage
 from bot.messages import get_message
 from bot.storage import get_application_store
 from bot.workflow import _send_submission_photos
@@ -67,23 +66,21 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
         get_message("workflow.position_prompt"),
         parse_mode="Markdown",
     )
-    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    session_dir = MEDIA_ROOT / f"{user.id}_{timestamp}_{uuid4().hex[:6]}"
-    session_dir.mkdir(parents=True, exist_ok=True)
-    session_key = session_dir.name
+    storage = get_media_storage(context)
+    session = storage.create_session(user.id)
+    session_key = session.key
     logger.info(
         "Starting new submission workflow for user {} with session {}",
         user.id,
         session_key,
     )
-    store.init_session(
-        user.id,
-        {
-            "photos": [],
-            "session_dir": session_dir,
-            "session_key": session_key,
-        },
-    )
+    session_data: dict[str, object] = {
+        "photos": [],
+        "session_key": session_key,
+    }
+    if session.directory is not None:
+        session_data["session_dir"] = session.directory
+    store.init_session(user.id, session_data)
     return POSITION
 
 
@@ -216,16 +213,16 @@ def _get_submission_with_cache(
     return _get_submission_from_state(state, session_key), False
 
 
-def _extract_photo_paths(submission: dict[str, str]) -> list[Path]:
+def _extract_photo_paths(submission: dict[str, str]) -> list[str]:
     raw_value = submission.get("photos", "")
     if not raw_value:
         return []
-    paths: list[Path] = []
+    handles: list[str] = []
     for item in raw_value.split(","):
         stripped = item.strip()
         if stripped:
-            paths.append(Path(stripped))
-    return paths
+            handles.append(stripped)
+    return handles
 
 
 def _format_detail_status(submission: dict[str, str]) -> str:
@@ -501,7 +498,7 @@ async def show_application_detail(
     photos = _extract_photo_paths(submission)
     chat_id = state.get("chat_id")
     if photos and isinstance(chat_id, int):
-        await _send_submission_photos(context.bot, chat_id, photos)
+        await _send_submission_photos(context, chat_id, photos)
 
     logger.debug(
         "Displayed submission %s details for user %s",
@@ -572,7 +569,7 @@ async def refresh_application_detail(
     if send_photos:
         photos = _extract_photo_paths(submission)
         if photos:
-            await _send_submission_photos(context.bot, chat_id, photos)
+            await _send_submission_photos(context, chat_id, photos)
 
 
 def get_cached_submission(
