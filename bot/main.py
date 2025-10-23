@@ -34,7 +34,6 @@ from bot.commands import (
     start,
 )
 from bot.config import create_valkey_client, load_config
-from bot.media_storage import create_media_storage
 from bot.constants import (
     ADMIN_ADD_ADMIN_WAIT_ID,
     ADMIN_BROADCAST_AUDIENCE,
@@ -70,6 +69,7 @@ from bot.editing import (
     start_edit_position,
 )
 from bot.logging import logger
+from bot.media_storage import create_media_storage
 from bot.workflow import (
     cancel,
     get_condition,

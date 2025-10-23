@@ -165,12 +165,16 @@ def stub_external_modules() -> Iterator[None]:
             def make_bucket(self, bucket: str) -> None:
                 self._storage.setdefault(bucket, {})
 
-            def fput_object(self, bucket: str, object_name: str, file_path: str) -> None:
+            def fput_object(
+                self, bucket: str, object_name: str, file_path: str
+            ) -> None:
                 self._storage.setdefault(bucket, {})
                 data = Path(file_path).read_bytes()
                 self._storage[bucket][object_name] = data
 
-            def fget_object(self, bucket: str, object_name: str, file_path: str) -> None:
+            def fget_object(
+                self, bucket: str, object_name: str, file_path: str
+            ) -> None:
                 data = self._storage.get(bucket, {}).get(object_name)
                 if data is None:
                     raise minio_error_module.S3Error("missing")
@@ -178,7 +182,9 @@ def stub_external_modules() -> Iterator[None]:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(data)
 
-            def list_objects(self, bucket: str, prefix: str = "", recursive: bool = False):
+            def list_objects(
+                self, bucket: str, prefix: str = "", recursive: bool = False
+            ):
                 for name in sorted(self._storage.get(bucket, {})):
                     if name.startswith(prefix):
                         yield _DummyObject(name)
@@ -212,7 +218,9 @@ def stub_external_modules() -> Iterator[None]:
 def bot_modules(stub_external_modules: None) -> SimpleNamespace:
     logging_module = importlib.reload(importlib.import_module("bot.logging"))
     storage_module = importlib.reload(importlib.import_module("bot.storage"))
-    media_storage_module = importlib.reload(importlib.import_module("bot.media_storage"))
+    media_storage_module = importlib.reload(
+        importlib.import_module("bot.media_storage")
+    )
     config_module = importlib.reload(importlib.import_module("bot.config"))
     workflow_module = importlib.reload(importlib.import_module("bot.workflow"))
     admin_module = importlib.reload(importlib.import_module("bot.admin"))

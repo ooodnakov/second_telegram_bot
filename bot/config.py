@@ -147,9 +147,7 @@ def _load_storage_settings(parser: ConfigParser, config_path: Path) -> dict[str,
         }
 
     backend = (
-        parser.get(STORAGE_CONFIG_SECTION, "backend", fallback="local")
-        .strip()
-        .lower()
+        parser.get(STORAGE_CONFIG_SECTION, "backend", fallback="local").strip().lower()
         or "local"
     )
     cache_dir_raw = parser.get(STORAGE_CONFIG_SECTION, "cache_dir", fallback="").strip()
@@ -159,7 +157,9 @@ def _load_storage_settings(parser: ConfigParser, config_path: Path) -> dict[str,
         local_root_raw = parser.get(
             STORAGE_CONFIG_SECTION, "local_root", fallback=str(DEFAULT_MEDIA_ROOT)
         ).strip()
-        local_root = Path(local_root_raw).expanduser() if local_root_raw else DEFAULT_MEDIA_ROOT
+        local_root = (
+            Path(local_root_raw).expanduser() if local_root_raw else DEFAULT_MEDIA_ROOT
+        )
         return {
             "backend": "local",
             "local_root": str(local_root),
@@ -167,7 +167,9 @@ def _load_storage_settings(parser: ConfigParser, config_path: Path) -> dict[str,
         }
 
     if backend == "minio":
-        endpoint = parser.get(STORAGE_CONFIG_SECTION, "minio_endpoint", fallback="").strip()
+        endpoint = parser.get(
+            STORAGE_CONFIG_SECTION, "minio_endpoint", fallback=""
+        ).strip()
         if not endpoint:
             raise RuntimeError(
                 f"MinIO endpoint must be configured in section '{STORAGE_CONFIG_SECTION}'"
@@ -183,7 +185,9 @@ def _load_storage_settings(parser: ConfigParser, config_path: Path) -> dict[str,
         secret_key = parser.get(
             STORAGE_CONFIG_SECTION, "minio_secret_key", fallback=""
         ).strip()
-        secure = parser.getboolean(STORAGE_CONFIG_SECTION, "minio_secure", fallback=True)
+        secure = parser.getboolean(
+            STORAGE_CONFIG_SECTION, "minio_secure", fallback=True
+        )
         prefix = parser.get(STORAGE_CONFIG_SECTION, "minio_prefix", fallback="").strip()
         cache_path = cache_dir or DEFAULT_MEDIA_CACHE
         return {

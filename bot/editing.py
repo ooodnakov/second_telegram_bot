@@ -19,8 +19,8 @@ from bot.constants import (
     SKIP_KEYWORD,
 )
 from bot.logging import logger
-from bot.messages import get_message
 from bot.media_storage import get_media_storage
+from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
@@ -325,9 +325,7 @@ async def start_edit_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     storage = get_media_storage(context)
     storage.get_session(session_key)
 
-    state = _store_edit_state(
-        context, session_key=session_key, user_id=user_id
-    )
+    state = _store_edit_state(context, session_key=session_key, user_id=user_id)
     state["photos"] = []
 
     await query.answer()

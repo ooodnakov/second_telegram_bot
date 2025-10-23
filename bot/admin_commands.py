@@ -39,8 +39,8 @@ from bot.constants import (
     UTC,
 )
 from bot.logging import logger
-from bot.messages import get_message
 from bot.media_storage import get_media_storage
+from bot.messages import get_message
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.constants import ChatType
 from telegram.error import BadRequest, TelegramError

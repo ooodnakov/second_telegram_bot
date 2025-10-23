@@ -75,9 +75,7 @@ class DummyUserMessage:
         self.replies.append(text)
 
 
-def _build_context(
-    bot_modules, bot, storage
-) -> tuple[object, SimpleNamespace]:
+def _build_context(bot_modules, bot, storage) -> tuple[object, SimpleNamespace]:
     client = bot_modules.storage.InMemoryValkey()
     bot_data = {
         "valkey_client": client,

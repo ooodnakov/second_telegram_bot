@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
 from loguru import logger
@@ -35,8 +36,17 @@ def custom_format(record: Mapping[str, Any]) -> str:
         str: Formatted log line with relative path and metadata.
 
     """
-    # Make path relative
-    path = str(getattr(record.get("file"), "path", ""))[1:]
+    # Render the file path relative to the working directory when possible.
+    raw_path = getattr(record.get("file"), "path", "")
+    path = str(raw_path or "")
+    if path:
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            try:
+                cwd = Path.cwd().resolve()
+                path = str(path_obj.resolve(strict=False).relative_to(cwd))
+            except ValueError:
+                path = path_obj.name
     return (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
