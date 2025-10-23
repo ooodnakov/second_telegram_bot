@@ -110,7 +110,9 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
     assert client.hgetall(f"{prefix}:session:{user_id}") == {}
 
 
-def test_get_contacts_without_session_sends_warning(tmp_path: Path, bot_modules) -> None:
+def test_get_contacts_without_session_sends_warning(
+    tmp_path: Path, bot_modules
+) -> None:
     workflow = bot_modules.workflow
     storage = bot_modules.storage
     client = storage.InMemoryValkey()

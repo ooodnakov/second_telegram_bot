@@ -20,8 +20,8 @@ from bot.constants import (
     UTC,
 )
 from bot.logging import logger
-from bot.messages import get_message
 from bot.media_storage import get_media_storage
+from bot.messages import get_message
 from bot.storage import get_application_store
 from telegram import (
     Bot,
@@ -168,6 +168,8 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
         return SIZE
+
+
 async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
