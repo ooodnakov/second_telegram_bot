@@ -12,3 +12,18 @@ valkey_host = valkey_common
 valkey_port = 6379
 valkey_pass = redis
 valkey_prefix = second_hand
+
+[storage]
+# Storage backend for uploaded media: "local" or "minio"
+backend = local
+# Directory used for local storage (defaults to the repository media/ folder)
+# local_root = ./media
+# Directory for caching remote media locally when using MinIO
+# cache_dir = ./media_cache
+# MinIO settings (used only when backend = minio)
+# minio_endpoint = play.min.io:9000
+# minio_bucket = telegram-bot
+# minio_access_key = access-key
+# minio_secret_key = secret-key
+# minio_secure = true
+# minio_prefix = uploads

@@ -16,11 +16,11 @@ from bot.constants import (
     EDIT_DESCRIPTION,
     EDIT_PHOTOS,
     EDIT_POSITION,
-    MEDIA_ROOT,
     SKIP_KEYWORD,
 )
 from bot.logging import logger
 from bot.messages import get_message
+from bot.media_storage import get_media_storage
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes, ConversationHandler
@@ -34,15 +34,12 @@ def _store_edit_state(
     *,
     session_key: str,
     user_id: int,
-    session_dir: Path | None = None,
 ) -> dict[str, Any]:
     state = {
         "session_key": session_key,
         "user_id": user_id,
         "photos": [],
     }
-    if session_dir is not None:
-        state["session_dir"] = session_dir
     context.user_data[EDIT_STATE_KEY] = state  # type: ignore[index]
     return state
 
@@ -325,12 +322,11 @@ async def start_edit_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.answer(get_message("general.session_missing"), show_alert=True)
         return ConversationHandler.END
 
-    session_dir_raw = submission.get("session_dir", "")
-    session_dir = Path(session_dir_raw) if session_dir_raw else MEDIA_ROOT / session_key
-    session_dir.mkdir(parents=True, exist_ok=True)
+    storage = get_media_storage(context)
+    storage.get_session(session_key)
 
     state = _store_edit_state(
-        context, session_key=session_key, user_id=user_id, session_dir=session_dir
+        context, session_key=session_key, user_id=user_id
     )
     state["photos"] = []
 
@@ -362,25 +358,22 @@ async def receive_photo_upload(
         await message.reply_text(get_message("edit.photos_expected"))
         return EDIT_PHOTOS
 
-    photos: list[Path] = state.setdefault("photos", [])
+    photos: list[str] = state.setdefault("photos", [])
     if len(photos) >= _MAX_PHOTO_COUNT:
         await message.reply_text(get_message("edit.photos_limit", keyword=SKIP_KEYWORD))
         return EDIT_PHOTOS
 
-    session_dir: Path | None = state.get("session_dir")
-    if session_dir is None:
-        await message.reply_text(get_message("edit.update_failed"))
-        logger.error("Session directory missing for photo edit %s", session_key)
-        _clear_edit_state(context)
-        return ConversationHandler.END
+    storage = get_media_storage(context)
+    session = storage.get_session(session_key)
 
     try:
         telegram_file = await context.bot.get_file(message.photo[-1].file_id)
         suffix = Path(telegram_file.file_path or "").suffix or ".jpg"
         filename = f"update_{len(photos) + 1:02d}{suffix}"
-        target_path = session_dir / filename
+        target_path = storage.allocate_path(session, filename)
         await telegram_file.download_to_drive(custom_path=str(target_path))
-        photos.append(target_path)
+        handle = storage.finalize_upload(session, target_path)
+        photos.append(handle)
         logger.info(
             "User %s uploaded photo %s for session %s", user.id, filename, session_key
         )
@@ -418,7 +411,7 @@ async def finalize_photo_upload(
         await message.reply_text(get_message("general.session_missing"))
         return ConversationHandler.END
 
-    photos: list[Path] = state.get("photos", [])
+    photos: list[str] = state.get("photos", [])
     if not photos:
         await message.reply_text(get_message("edit.photos_min_required"))
         return EDIT_PHOTOS

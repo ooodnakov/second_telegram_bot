@@ -4,6 +4,7 @@ import enum
 import importlib
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterator
 
@@ -143,6 +144,55 @@ def stub_external_modules() -> Iterator[None]:
         valkey_module.Valkey = _DummyValkey
         monkeypatch.setitem(sys.modules, "valkey", valkey_module)
 
+    if "minio" not in sys.modules:
+        import io
+
+        minio_module = types.ModuleType("minio")
+        minio_error_module = types.ModuleType("minio.error")
+        minio_error_module.S3Error = type("S3Error", (Exception,), {})
+
+        class _DummyObject:
+            def __init__(self, name: str) -> None:
+                self.object_name = name
+
+        class _DummyMinio:
+            def __init__(self, *args, **kwargs) -> None:
+                self._storage: dict[str, dict[str, bytes]] = {}
+
+            def bucket_exists(self, bucket: str) -> bool:
+                return bucket in self._storage
+
+            def make_bucket(self, bucket: str) -> None:
+                self._storage.setdefault(bucket, {})
+
+            def fput_object(self, bucket: str, object_name: str, file_path: str) -> None:
+                self._storage.setdefault(bucket, {})
+                data = Path(file_path).read_bytes()
+                self._storage[bucket][object_name] = data
+
+            def fget_object(self, bucket: str, object_name: str, file_path: str) -> None:
+                data = self._storage.get(bucket, {}).get(object_name)
+                if data is None:
+                    raise minio_error_module.S3Error("missing")
+                target = Path(file_path)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+
+            def list_objects(self, bucket: str, prefix: str = "", recursive: bool = False):
+                for name in sorted(self._storage.get(bucket, {})):
+                    if name.startswith(prefix):
+                        yield _DummyObject(name)
+
+            def get_object(self, bucket: str, object_name: str):
+                data = self._storage.get(bucket, {}).get(object_name)
+                if data is None:
+                    raise minio_error_module.S3Error("missing")
+                return io.BytesIO(data)
+
+        minio_module.Minio = _DummyMinio
+        monkeypatch.setitem(sys.modules, "minio", minio_module)
+        monkeypatch.setitem(sys.modules, "minio.error", minio_error_module)
+
     if "valkey.exceptions" not in sys.modules:
         valkey_exceptions = types.ModuleType("valkey.exceptions")
         base = type("ValkeyError", (Exception,), {})
@@ -162,6 +212,7 @@ def stub_external_modules() -> Iterator[None]:
 def bot_modules(stub_external_modules: None) -> SimpleNamespace:
     logging_module = importlib.reload(importlib.import_module("bot.logging"))
     storage_module = importlib.reload(importlib.import_module("bot.storage"))
+    media_storage_module = importlib.reload(importlib.import_module("bot.media_storage"))
     config_module = importlib.reload(importlib.import_module("bot.config"))
     workflow_module = importlib.reload(importlib.import_module("bot.workflow"))
     admin_module = importlib.reload(importlib.import_module("bot.admin"))
@@ -175,6 +226,7 @@ def bot_modules(stub_external_modules: None) -> SimpleNamespace:
         logging=logging_module,
         config=config_module,
         storage=storage_module,
+        media_storage=media_storage_module,
         workflow=workflow_module,
         admin=admin_module,
         admin_commands=admin_commands_module,

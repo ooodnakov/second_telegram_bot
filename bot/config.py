@@ -23,6 +23,9 @@ from valkey.exceptions import (
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.ini"
 CONFIG_SECTION = "telegram"
 VALKEY_CONFIG_SECTION = "valkey"
+STORAGE_CONFIG_SECTION = "storage"
+DEFAULT_MEDIA_ROOT = Path(__file__).resolve().parent.parent / "media"
+DEFAULT_MEDIA_CACHE = DEFAULT_MEDIA_ROOT / "cache"
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -108,14 +111,18 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
         or "second_hand"
     )
 
+    storage_settings = _load_storage_settings(parser, config_path)
+    backend = storage_settings.get("backend", "local")
+
     logger.info(
-        "Configuration loaded for {} moderators, {} super admins and Valkey host {}:{} with prefix '{}'",
+        "Configuration loaded for {} moderators, {} super admins and Valkey host {}:{} with prefix '{}'",  # noqa: E501
         len(moderators),
         len(super_admins),
         host,
         port,
         prefix,
     )
+    logger.info("Media storage backend configured: {}", backend)
 
     return {
         "token": token,
@@ -127,7 +134,74 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "password": password or None,
             "prefix": prefix,
         },
+        "storage": storage_settings,
     }
+
+
+def _load_storage_settings(parser: ConfigParser, config_path: Path) -> dict[str, Any]:
+    if not parser.has_section(STORAGE_CONFIG_SECTION):
+        return {
+            "backend": "local",
+            "local_root": str(DEFAULT_MEDIA_ROOT),
+            "cache_dir": str(DEFAULT_MEDIA_ROOT),
+        }
+
+    backend = (
+        parser.get(STORAGE_CONFIG_SECTION, "backend", fallback="local")
+        .strip()
+        .lower()
+        or "local"
+    )
+    cache_dir_raw = parser.get(STORAGE_CONFIG_SECTION, "cache_dir", fallback="").strip()
+    cache_dir = Path(cache_dir_raw).expanduser() if cache_dir_raw else None
+
+    if backend == "local":
+        local_root_raw = parser.get(
+            STORAGE_CONFIG_SECTION, "local_root", fallback=str(DEFAULT_MEDIA_ROOT)
+        ).strip()
+        local_root = Path(local_root_raw).expanduser() if local_root_raw else DEFAULT_MEDIA_ROOT
+        return {
+            "backend": "local",
+            "local_root": str(local_root),
+            "cache_dir": str(cache_dir or local_root),
+        }
+
+    if backend == "minio":
+        endpoint = parser.get(STORAGE_CONFIG_SECTION, "minio_endpoint", fallback="").strip()
+        if not endpoint:
+            raise RuntimeError(
+                f"MinIO endpoint must be configured in section '{STORAGE_CONFIG_SECTION}'"
+            )
+        bucket = parser.get(STORAGE_CONFIG_SECTION, "minio_bucket", fallback="").strip()
+        if not bucket:
+            raise RuntimeError(
+                f"MinIO bucket must be configured in section '{STORAGE_CONFIG_SECTION}'"
+            )
+        access_key = parser.get(
+            STORAGE_CONFIG_SECTION, "minio_access_key", fallback=""
+        ).strip()
+        secret_key = parser.get(
+            STORAGE_CONFIG_SECTION, "minio_secret_key", fallback=""
+        ).strip()
+        secure = parser.getboolean(STORAGE_CONFIG_SECTION, "minio_secure", fallback=True)
+        prefix = parser.get(STORAGE_CONFIG_SECTION, "minio_prefix", fallback="").strip()
+        cache_path = cache_dir or DEFAULT_MEDIA_CACHE
+        return {
+            "backend": "minio",
+            "cache_dir": str(cache_path),
+            "minio": {
+                "endpoint": endpoint,
+                "bucket": bucket,
+                "access_key": access_key,
+                "secret_key": secret_key,
+                "secure": secure,
+                "prefix": prefix,
+            },
+        }
+
+    raise RuntimeError(
+        f"Unsupported storage backend '{backend}' in config file {config_path}"
+    )
 
 
 def create_valkey_client(settings: dict[str, Any]) -> Valkey | InMemoryValkey:
@@ -170,6 +244,7 @@ __all__ = [
     "CONFIG_SECTION",
     "DEFAULT_CONFIG_PATH",
     "VALKEY_CONFIG_SECTION",
+    "STORAGE_CONFIG_SECTION",
     "create_valkey_client",
     "load_config",
 ]

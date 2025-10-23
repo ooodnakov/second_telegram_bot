@@ -34,6 +34,7 @@ from bot.commands import (
     start,
 )
 from bot.config import create_valkey_client, load_config
+from bot.media_storage import create_media_storage
 from bot.constants import (
     ADMIN_ADD_ADMIN_WAIT_ID,
     ADMIN_BROADCAST_AUDIENCE,
@@ -106,6 +107,8 @@ def main() -> None:
     valkey_client = create_valkey_client(config)
     app.bot_data["valkey_client"] = valkey_client
     app.bot_data["valkey_prefix"] = config["valkey"]["prefix"]
+    media_storage = create_media_storage(config.get("storage"))
+    app.bot_data["media_storage"] = media_storage
     app.bot_data["moderator_chat_ids"] = config.get("moderator_chat_ids", [])
     app.bot_data["super_admin_ids"] = config.get("super_admin_ids", [])
     logger.debug(

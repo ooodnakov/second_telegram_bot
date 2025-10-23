@@ -25,10 +25,10 @@ def test_application_store_emits_logging(tmp_path: Path, bot_modules) -> None:
         store.init_session(42, initial_data)
         store.set_fields(42, position="Chair")
         photos = store.append_photo(42, photo_path)
-        assert photo_path in photos
+        assert str(photo_path) in photos
         session = store.get(42)
         assert session["position"] == "Chair"
-        assert session["photos"][0] == photo_path
+        assert session["photos"][0] == str(photo_path)
         store.clear(42)
 
     messages = extract_messages(events)

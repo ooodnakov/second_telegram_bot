@@ -98,14 +98,15 @@ class ApplicationStore:
             sorted(fields.keys()),
         )
 
-    def append_photo(self, user_id: int, photo_path: Path) -> list[Path]:
+    def append_photo(self, user_id: int, photo_handle: Path | str) -> list[str]:
         session = self.get(user_id)
-        photos = session.get("photos", [])
-        photos.append(photo_path)
+        photos: list[str] = list(session.get("photos", []))
+        handle = str(photo_handle)
+        photos.append(handle)
         self.set_fields(user_id, photos=photos)
         logger.debug(
             "Appended photo {} for user {} (total now {})",
-            photo_path,
+            handle,
             user_id,
             len(photos),
         )
@@ -135,7 +136,7 @@ class ApplicationStore:
         serialized: dict[str, str] = {}
         for field, value in data.items():
             if field in self._LIST_FIELDS:
-                serialized[field] = json.dumps([str(Path(item)) for item in value])
+                serialized[field] = json.dumps([str(item) for item in value])
             elif field in self._INT_FIELDS:
                 serialized[field] = "" if value is None else str(value)
             elif isinstance(value, Path):
@@ -153,7 +154,8 @@ class ApplicationStore:
             value = raw_value.decode() if isinstance(raw_value, bytes) else raw_value
             if key in self._LIST_FIELDS:
                 if value:
-                    result[key] = [Path(item) for item in json.loads(value)]
+                    items = json.loads(value)
+                    result[key] = [str(item) for item in items]
                 else:
                     result[key] = []
             elif key in self._INT_FIELDS:
