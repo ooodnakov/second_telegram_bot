@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -133,41 +134,31 @@ async def get_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photos = store.append_photo(user.id, handle)
     user_data["photos"] = photos
 
-    count = len(photos)
-    if count < 2:
-        logger.debug("User {} has {} photos; requesting more", user.id, count)
-        await _send_photo_prompt(
-            update,
-            context,
-            user_data,
-            get_message("workflow.photos_additional_required"),
+    media_group_id = update.message.media_group_id
+    if media_group_id:
+        store.set_fields(
+            user.id,
+            _photo_album_id=media_group_id,
+            _photo_album_last_message_id=update.message.message_id,
         )
-        return PHOTOS
-    elif count < 5:
-        logger.debug(
-            "User {} has {} photos; prompting for optional uploads", user.id, count
-        )
-        await _send_photo_prompt(
-            update,
-            context,
-            user_data,
-            get_message(
-                "workflow.photos_additional_optional",
-                count=count,
-                keyword=SKIP_KEYWORD,
-            ),
-        )
-        return PHOTOS
-    else:
-        logger.debug("User {} reached maximum photo count", user.id)
-        await _send_photo_prompt(
-            update,
-            context,
-            user_data,
-            get_message("workflow.photos_max_prompt"),
-            parse_mode="Markdown",
-        )
-        return SIZE
+        await asyncio.sleep(0.75)
+        refreshed_data = store.get(user.id)
+        if not refreshed_data:
+            logger.warning(
+                "Photo handler could not locate session for user {}", user.id
+            )
+            await update.message.reply_text(get_message("general.session_missing"))
+            return ConversationHandler.END
+        if (
+            refreshed_data.get("_photo_album_id") != media_group_id
+            or refreshed_data.get("_photo_album_last_message_id")
+            != update.message.message_id
+        ):
+            return PHOTOS
+        user_data = refreshed_data
+
+    count = len(user_data.get("photos", []))
+    return await _handle_photo_count(update, context, user_data, count)
 
 
 async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -343,6 +334,49 @@ async def _send_photo_prompt(
         getattr(update.effective_user, "id", "unknown"),
         message.message_id,
     )
+
+
+async def _handle_photo_count(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_data: dict[str, Any],
+    count: int,
+) -> int:
+    user = update.effective_user
+    if count < 2:
+        logger.debug("User {} has {} photos; requesting more", user.id, count)
+        await _send_photo_prompt(
+            update,
+            context,
+            user_data,
+            get_message("workflow.photos_additional_required"),
+        )
+        return PHOTOS
+    elif count < 5:
+        logger.debug(
+            "User {} has {} photos; prompting for optional uploads", user.id, count
+        )
+        await _send_photo_prompt(
+            update,
+            context,
+            user_data,
+            get_message(
+                "workflow.photos_additional_optional",
+                count=count,
+                keyword=SKIP_KEYWORD,
+            ),
+        )
+        return PHOTOS
+
+    logger.debug("User {} reached maximum photo count", user.id)
+    await _send_photo_prompt(
+        update,
+        context,
+        user_data,
+        get_message("workflow.photos_max_prompt"),
+        parse_mode="Markdown",
+    )
+    return SIZE
 
 
 async def _forward_to_moderators(
