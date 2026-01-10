@@ -12,13 +12,16 @@ services:
       - ./media:/workspace/media
       - ./config.ini:/workspace/config.ini:ro
       - ./pyproject.toml:/workspace/pyproject.toml:ro
-    user: 1001:1001
+    user: 0:0
     env_file: .env
+    environment:
+      - HOME=/workspace
+      - XDG_CACHE_HOME=/workspace/.cache
     deploy:
       resources:
         limits:
           cpus: '0.5'
-          memory: 512M
+          memory: 1024M
 
 networks:
   proxy:

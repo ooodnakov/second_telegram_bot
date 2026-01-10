@@ -17,7 +17,9 @@ RUN uv sync
 FROM python:3.12-slim AS runtime
 ENV DEBIAN_FRONTEND=noninteractive \
     VIRTUAL_ENV=/workspace/.venv \
-    PATH="/workspace/.venv/bin:/root/.local/bin:$PATH"
+    PATH="/workspace/.venv/bin:/workspace/.local/bin:/root/.local/bin:$PATH" \
+    HOME=/workspace \
+    XDG_CACHE_HOME=/workspace/.cache
 WORKDIR /workspace
 
 # Runtime dependencies only
@@ -26,9 +28,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-RUN useradd --create-home --shell /bin/bash --uid 1001 rem && \
-    mkdir -p /workspace && \
-    chown -R rem:rem /workspace
+RUN mkdir -p /workspace && \
+    chown -R root:root /workspace && \
+    mkdir -p /workspace/.cache && \
+    chmod 0777 /workspace/.cache
 
 COPY --from=builder --chown=rem:rem /workspace/.venv /workspace/.venv
 COPY --chown=rem:rem pyproject.toml uv.lock ./
