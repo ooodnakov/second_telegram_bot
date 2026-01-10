@@ -587,13 +587,46 @@ async def show_application_detail(
     await query.answer()
 
     text = _format_detail_text(submission)
-    keyboard = _build_detail_keyboard(session_key, current_page, user.id)
+    photo_paths = _available_photo_paths(context, submission)
+    photo_total = len(photo_paths)
+    photo_indexes = state.setdefault("photo_indexes", {})
+    previous_session_key = state.get("current_session_key")
+    if session_key != previous_session_key or session_key not in photo_indexes:
+        photo_indexes[session_key] = 0
+    photo_index = photo_indexes.get(session_key, 0)
+    if photo_total > 0:
+        photo_index %= photo_total
+    else:
+        photo_index = 0
+    photo_indexes[session_key] = photo_index
+    keyboard = _build_detail_keyboard(session_key, current_page, user.id, photo_total)
     message = query.message
-    try:
-        await query.edit_message_text(text, reply_markup=keyboard)
-    except BadRequest as exc:
-        if "message is not modified" not in str(exc).lower():
-            raise
+    detail_is_media = bool(message is not None and getattr(message, "photo", None))
+    state["detail_is_media"] = detail_is_media
+    if detail_is_media:
+        photo_stream = _open_photo_stream(photo_paths, photo_index)
+        try:
+            media = InputMediaPhoto(media=photo_stream, caption=text)
+            await context.bot.edit_message_media(
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                media=media,
+                reply_markup=keyboard,
+            )
+        except BadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                raise
+        finally:
+            try:
+                photo_stream.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to close list photo stream")
+    else:
+        try:
+            await query.edit_message_text(text, reply_markup=keyboard)
+        except BadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                raise
     if message is not None:
         state["detail_message_id"] = message.message_id
         try:
@@ -604,16 +637,100 @@ async def show_application_detail(
                 state["chat_id"] = getattr(chat, "id", None)
     state["current_session_key"] = session_key
 
-    photos = _extract_photo_paths(submission)
-    chat_id = state.get("chat_id")
-    if photos and isinstance(chat_id, int):
-        await _send_submission_photos(context, chat_id, photos)
-
     logger.debug(
         "Displayed submission %s details for user %s",
         session_key,
         user.id,
     )
+
+
+async def navigate_list_photo_prev(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    await _navigate_list_photo(update, context, -1)
+
+
+async def navigate_list_photo_next(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    await _navigate_list_photo(update, context, 1)
+
+
+async def _navigate_list_photo(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, direction: int
+) -> None:
+    query = update.callback_query
+    if query is None:
+        logger.warning("Received list photo update without query: {}", update)
+        return
+
+    data = (query.data or "").split(":", 2)
+    if len(data) < 3 or data[0] != "list_photo":
+        return
+
+    session_key = data[2]
+    user = query.from_user
+    if user is None:
+        logger.warning("List photo navigation missing user: %s", update)
+        return
+
+    state = _get_or_create_list_state(context)
+    if state.get("user_id") != user.id:
+        await query.answer(get_message("general.navigation_denied"), show_alert=True)
+        return
+
+    submissions = _ensure_submissions_loaded(context, state, user.id)
+    if submissions is None:
+        await query.answer(get_message("general.storage_unavailable"), show_alert=True)
+        return
+
+    submission = _get_submission_from_state(state, session_key)
+    if submission is None:
+        await query.answer(get_message("general.session_missing"), show_alert=True)
+        return
+
+    photo_paths = _available_photo_paths(context, submission)
+    photo_total = len(photo_paths)
+    if photo_total == 0:
+        await query.answer(get_message("admin.photo_missing"), show_alert=False)
+        return
+
+    photo_indexes = state.setdefault("photo_indexes", {})
+    photo_index = photo_indexes.get(session_key, 0) + direction
+    photo_index %= photo_total
+    photo_indexes[session_key] = photo_index
+
+    text = _format_detail_text(submission)
+    keyboard = _build_detail_keyboard(
+        session_key,
+        state.get("page", 0),
+        user.id,
+        photo_total,
+    )
+    message = query.message
+    if message is None:
+        return
+
+    photo_stream = _open_photo_stream(photo_paths, photo_index)
+    try:
+        media = InputMediaPhoto(media=photo_stream, caption=text)
+        await context.bot.edit_message_media(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            media=media,
+            reply_markup=keyboard,
+        )
+    except BadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+    finally:
+        try:
+            photo_stream.close()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to close list navigation photo stream")
+
+    state["current_session_key"] = session_key
+    state["detail_is_media"] = True
 
 
 async def refresh_application_detail(
@@ -661,24 +778,61 @@ async def refresh_application_detail(
 
     page = state.get("page", 0)
     text = _format_detail_text(submission)
-    keyboard = _build_detail_keyboard(session_key, page, user_id)
-    try:
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text=text,
-            reply_markup=keyboard,
-        )
-    except BadRequest as exc:
-        if "message is not modified" not in str(exc).lower():
-            raise
+    photo_paths = _available_photo_paths(context, submission)
+    photo_total = len(photo_paths)
+    photo_indexes = state.setdefault("photo_indexes", {})
+    photo_index = photo_indexes.get(session_key, 0)
+    if photo_total > 0:
+        photo_index %= photo_total
+    else:
+        photo_index = 0
+    photo_indexes[session_key] = photo_index
+    keyboard = _build_detail_keyboard(session_key, page, user_id, photo_total)
+    if state.get("detail_is_media", True):
+        photo_stream = _open_photo_stream(photo_paths, photo_index)
+        try:
+            media = InputMediaPhoto(media=photo_stream, caption=text)
+            await context.bot.edit_message_media(
+                chat_id=chat_id,
+                message_id=message_id,
+                media=media,
+                reply_markup=keyboard,
+            )
+        except BadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text=text,
+                        reply_markup=keyboard,
+                    )
+                    state["detail_is_media"] = False
+                except BadRequest as nested_exc:
+                    if "message is not modified" in str(nested_exc).lower():
+                        return
+                    raise
+        finally:
+            try:
+                photo_stream.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("Failed to close list refresh photo stream")
+    else:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                reply_markup=keyboard,
+            )
+        except BadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                raise
 
     state["current_session_key"] = session_key
 
     if send_photos:
-        photos = _extract_photo_paths(submission)
-        if photos:
-            await _send_submission_photos(context, chat_id, photos)
+        logger.debug("Skipped sending extra photos during list refresh for %s", user_id)
 
 
 def get_cached_submission(
