@@ -343,13 +343,28 @@ def _build_detail_keyboard(
                 callback_data=f"delete:select:{session_key}",
             )
         ],
+    ]
+    if photo_total > 1:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    get_message("admin.photo_prev_button"),
+                    callback_data=f"list_photo:prev:{session_key}",
+                ),
+                InlineKeyboardButton(
+                    get_message("admin.photo_next_button"),
+                    callback_data=f"list_photo:next:{session_key}",
+                ),
+            ]
+        )
+    buttons.append(
         [
             InlineKeyboardButton(
                 get_message("list.back_to_list_button"),
                 callback_data=f"list:page:{page}:{user_id}",
             )
-        ],
-    ]
+        ]
+    )
     return InlineKeyboardMarkup(buttons)
 
 
@@ -384,11 +399,27 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _set_list_state_submissions(state, submissions)
     state["user_id"] = user.id
     state["page"] = 0
+    state["photo_indexes"] = {}
+    state["detail_is_media"] = True
     state.pop("detail_message_id", None)
     state.pop("chat_id", None)
     text, keyboard, current_page = _render_applications_page(submissions, 0, user.id)
     state["page"] = current_page
-    await update.message.reply_text(text, reply_markup=keyboard)
+    cover_path = _list_cover_path(context)
+    if cover_path is None:
+        await update.message.reply_text(text, reply_markup=keyboard)
+    else:
+        chat = update.effective_chat
+        if chat is None:
+            await update.message.reply_text(text, reply_markup=keyboard)
+        else:
+            with cover_path.open("rb") as photo_stream:
+                await context.bot.send_photo(
+                    chat_id=chat.id,
+                    photo=photo_stream,
+                    caption=text,
+                    reply_markup=keyboard,
+                )
     logger.debug("Displayed submissions page 1 for user {}", user.id)
     return ConversationHandler.END
 
@@ -439,16 +470,42 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text, keyboard, current_page = _render_applications_page(submissions, page, user.id)
     state["page"] = current_page
-    try:
-        await query.edit_message_text(text, reply_markup=keyboard)
-    except BadRequest as exc:
-        if "message is not modified" in str(exc).lower():
-            logger.debug(
-                "Pagination request for user {} ignored because message not modified",
-                user.id,
+    cover_path = _list_cover_path(context)
+    if cover_path is not None and query.message is not None:
+        photo_stream = cover_path.open("rb")
+        try:
+            media = InputMediaPhoto(media=photo_stream, caption=text)
+            await context.bot.edit_message_media(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                media=media,
+                reply_markup=keyboard,
             )
-            return
-        raise
+        except BadRequest as exc:
+            lowered = str(exc).lower()
+            if "message is not modified" in lowered:
+                logger.debug(
+                    "Pagination request for user {} ignored because message not modified",
+                    user.id,
+                )
+                return
+            try:
+                await query.edit_message_caption(caption=text, reply_markup=keyboard)
+            except BadRequest:
+                await query.edit_message_text(text, reply_markup=keyboard)
+        finally:
+            photo_stream.close()
+    else:
+        try:
+            await query.edit_message_text(text, reply_markup=keyboard)
+        except BadRequest as exc:
+            if "message is not modified" in str(exc).lower():
+                logger.debug(
+                    "Pagination request for user {} ignored because message not modified",
+                    user.id,
+                )
+                return
+            raise
     logger.debug("User {} navigated to submissions page {}", user.id, current_page + 1)
 
 
