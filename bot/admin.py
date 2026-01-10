@@ -146,7 +146,7 @@ def fetch_all_submissions(context: Any) -> list[dict[str, str]] | None:
     submissions: list[dict[str, str]] = []
     for key in list_application_keys(context):
         record = load_application(client, key)
-        if record:
+        if record and not record.get("deleted_at"):
             submissions.append(record)
     submissions.sort(key=lambda item: item.get("created_at", ""), reverse=True)
     return submissions
@@ -285,6 +285,53 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
         return False
 
     logger.info("Application %s revoked by user %s", key, user_id)
+    return True
+
+
+def mark_application_deleted(context: Any, session_key: str, user_id: int) -> bool:
+    client = _get_client(context)
+    if client is None:
+        logger.warning(
+            "Valkey client missing while deleting application %s", session_key
+        )
+        return False
+
+    prefix = _get_prefix(context)
+    key = f"{prefix}:{session_key}"
+    record = load_application(client, key)
+    if not record:
+        logger.warning("Application %s not found for deletion", key)
+        return False
+
+    owner = record.get("user_id")
+    if owner != str(user_id):
+        logger.warning(
+            "User %s attempted to delete application %s owned by %s",
+            user_id,
+            key,
+            owner,
+        )
+        return False
+
+    if record.get("deleted_at"):
+        logger.info("Application %s is already deleted", key)
+        return False
+
+    timestamp = datetime.now(UTC).isoformat()
+    if not timestamp:
+        logger.error("Failed to generate deletion timestamp for %s", key)
+        return False
+
+    try:
+        client.hset(  # type: ignore[attr-defined] - runtime Valkey client exposes hset
+            key,
+            mapping={"deleted_at": timestamp, "deleted_by": str(user_id)},
+        )
+    except ValkeyError:
+        logger.exception("Failed to mark application %s as deleted", key)
+        return False
+
+    logger.info("Application %s deleted by user %s", key, user_id)
     return True
 
 
@@ -440,6 +487,7 @@ __all__ = [
     "load_broadcast_record",
     "remove_admin",
     "mark_application_revoked",
+    "mark_application_deleted",
     "mark_application_reviewed",
     "record_active_user",
     "recipients_for_audience",
