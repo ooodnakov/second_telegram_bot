@@ -33,7 +33,7 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 rem && \
 COPY --from=builder --chown=rem:rem /workspace/.venv /workspace/.venv
 COPY --chown=rem:rem pyproject.toml uv.lock ./
 COPY --chown=rem:rem ./bot ./bot
-COPY --chown=rem:rem config.ini.example ./config.ini.example
+COPY --chown=rem:rem config.ini ./config.ini
 
 USER rem
 

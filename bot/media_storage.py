@@ -86,7 +86,7 @@ class MediaStorage(ABC):
             try:
                 path = self.cache_photo(normalized)
             except FileNotFoundError:
-                logger.warning("Photo handle %s could not be cached", normalized)
+                logger.warning(f"Photo handle {normalized} could not be cached")
                 continue
             if path.exists():
                 cached.append(path)
@@ -117,7 +117,7 @@ class LocalMediaStorage(MediaStorage):
         key = _generate_session_key(user_id)
         directory = _resolve_within(self._root, key)
         directory.mkdir(parents=True, exist_ok=True)
-        logger.debug("Created local media session %s at %s", key, directory)
+        logger.debug(f"Created local media session {key} at {directory}")
         return MediaSession(key=key, directory=directory)
 
     def get_session(self, session_key: str) -> MediaSession:
@@ -125,8 +125,7 @@ class LocalMediaStorage(MediaStorage):
             directory = _resolve_within(self._root, session_key)
         except FileNotFoundError as exc:
             logger.warning(
-                "Rejected session key %s that resolves outside storage root",
-                session_key,
+                f"Rejected session key {session_key} that resolves outside storage root"
             )
             raise RuntimeError("Invalid session key") from exc
         directory.mkdir(parents=True, exist_ok=True)
@@ -152,7 +151,7 @@ class LocalMediaStorage(MediaStorage):
             source = target.resolve(strict=True)
 
         handle = f"{session.key}/{source.name}"
-        logger.debug("Stored local media handle %s", handle)
+        logger.debug(f"Stored local media handle {handle}")
         return handle
 
     def list_photo_handles(self, session_key: str) -> list[str]:
@@ -160,7 +159,7 @@ class LocalMediaStorage(MediaStorage):
             directory = _resolve_within(self._root, session_key)
         except FileNotFoundError:
             logger.warning(
-                "Skipping photo listing for invalid session key %s", session_key
+                f"Skipping photo listing for invalid session key {session_key}"
             )
             return []
         if not directory.exists():
@@ -223,12 +222,12 @@ class MinioMediaStorage(MediaStorage):
             if not self._client.bucket_exists(self._bucket):
                 self._client.make_bucket(self._bucket)
         except S3Error as exc:  # pragma: no cover - depends on remote service
-            logger.exception("Failed to ensure MinIO bucket %s: %s", self._bucket, exc)
+            logger.exception(f"Failed to ensure MinIO bucket {self._bucket}: {exc}")
             raise
 
     def create_session(self, user_id: int) -> MediaSession:
         key = _generate_session_key(user_id)
-        logger.debug("Created MinIO media session %s", key)
+        logger.debug(f"Created MinIO media session {key}")
         return MediaSession(key=key)
 
     def get_session(self, session_key: str) -> MediaSession:
@@ -243,10 +242,7 @@ class MinioMediaStorage(MediaStorage):
         object_name = self._object_name(f"{session.key}/{path.name}")
         self._client.fput_object(self._bucket, object_name, str(path))
         logger.debug(
-            "Uploaded media %s to MinIO bucket %s as %s",
-            path,
-            self._bucket,
-            object_name,
+            f"Uploaded media {path} to MinIO bucket {self._bucket} as {object_name}"
         )
         return f"{session.key}/{path.name}"
 
@@ -262,9 +258,7 @@ class MinioMediaStorage(MediaStorage):
                     continue
                 handles.append(self._handle_from_object_name(object_name))
         except S3Error as exc:  # pragma: no cover - depends on remote service
-            logger.warning(
-                "Failed to list objects for session %s: %s", session_key, exc
-            )
+            logger.warning(f"Failed to list objects for session {session_key}: {exc}")
         return handles
 
     def cache_photo(self, handle: str) -> Path:
@@ -284,10 +278,7 @@ class MinioMediaStorage(MediaStorage):
                 self._client.fget_object(self._bucket, object_name, str(target))
             except S3Error as exc:
                 logger.warning(
-                    "Failed to download %s from MinIO bucket %s: %s",
-                    object_name,
-                    self._bucket,
-                    exc,
+                    f"Failed to download {object_name} from MinIO bucket {self._bucket}: {exc}"
                 )
                 raise FileNotFoundError(handle) from exc
         return target
