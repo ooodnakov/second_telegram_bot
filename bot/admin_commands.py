@@ -15,9 +15,9 @@ from bot.admin import (
     add_admin,
     clear_application_review,
     fetch_all_submissions,
-    get_admins,
     get_admin_id_for_username,
     get_admin_username_for_id,
+    get_admins,
     get_super_admins,
     get_user_id_for_username,
     is_admin,
@@ -98,9 +98,7 @@ async def _resolve_admin_identifier(
         return stored_user_id, None, username
     bot = getattr(context, "bot", None)
     if bot is None or not hasattr(bot, "get_chat"):
-        logger.warning(
-            f"Context bot missing while resolving admin identifier {text}"
-        )
+        logger.warning(f"Context bot missing while resolving admin identifier {text}")
         return None, "not_found", username
 
     try:
@@ -535,9 +533,7 @@ async def receive_remove_admin_id(
         )
     else:
         await message.reply_text(get_message("general.storage_unavailable_support"))
-        logger.error(
-            f"Failed to remove admin {target_admin_id} due to storage issue"
-        )
+        logger.error(f"Failed to remove admin {target_admin_id} due to storage issue")
     return ConversationHandler.END
 
 

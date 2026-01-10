@@ -156,9 +156,7 @@ def test_receive_admin_id_accepts_username(bot_modules, tmp_path) -> None:
         admin_commands.get_message("admin.add_success", user_id=777)
     ]
     assert 777 in admin_module.get_admins(context)
-    assert (
-        admin_module.get_admin_id_for_username(context, "@new_admin") == 777
-    )
+    assert admin_module.get_admin_id_for_username(context, "@new_admin") == 777
 
 
 def test_receive_admin_id_uses_stored_username(bot_modules, tmp_path) -> None:

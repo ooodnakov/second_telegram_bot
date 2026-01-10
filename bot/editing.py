@@ -372,7 +372,9 @@ async def receive_photo_upload(
             f"User {user.id} uploaded photo {filename} for session {session_key}"
         )
     except (TelegramError, OSError):  # pragma: no cover - network/IO related
-        logger.exception(f"Failed to download photo for session {session_key} during edit")
+        logger.exception(
+            f"Failed to download photo for session {session_key} during edit"
+        )
         await message.reply_text(get_message("edit.update_failed"))
         _clear_edit_state(context)
         return ConversationHandler.END
