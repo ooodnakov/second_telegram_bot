@@ -129,6 +129,64 @@ def test_mark_application_reviewed_sets_fields(bot_modules) -> None:
     assert record.get("reviewed_at") == timestamp
 
 
+def test_mark_application_deleted_success(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    session_key = "session-delete"
+    key = f"{prefix}:{session_key}"
+
+    client.hset(
+        key,
+        mapping={
+            "session_key": session_key,
+            "user_id": "42",
+            "position": "Test",
+        },
+    )
+    client.sadd(f"{prefix}:applications", key)
+
+    result = bot_modules.admin.mark_application_deleted(context, session_key, 42)
+    assert result is True
+
+    record = client.hgetall(key)
+    assert record.get("deleted_by") == "42"
+    assert record.get("deleted_at")
+
+
+def test_fetch_all_submissions_excludes_deleted(bot_modules) -> None:
+    client = bot_modules.storage.InMemoryValkey()
+    prefix = "testbot"
+    context = _make_context(client, prefix=prefix)
+    active_key = f"{prefix}:submission:active"
+    deleted_key = f"{prefix}:submission:deleted"
+
+    client.hset(
+        active_key,
+        mapping={
+            "session_key": "active",
+            "user_id": "1",
+            "created_at": "2024-01-01T00:00:00+00:00",
+        },
+    )
+    client.hset(
+        deleted_key,
+        mapping={
+            "session_key": "deleted",
+            "user_id": "2",
+            "created_at": "2024-01-02T00:00:00+00:00",
+            "deleted_at": "2024-01-03T00:00:00+00:00",
+        },
+    )
+    client.sadd(f"{prefix}:applications", active_key)
+    client.sadd(f"{prefix}:applications", deleted_key)
+
+    submissions = bot_modules.admin.fetch_all_submissions(context)
+    assert submissions is not None
+    assert len(submissions) == 1
+    assert submissions[0].get("session_key") == "active"
+
+
 def test_clear_application_review_resets_fields(bot_modules) -> None:
     client = bot_modules.storage.InMemoryValkey()
     prefix = "testbot"

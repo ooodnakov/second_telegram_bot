@@ -167,6 +167,32 @@ def test_list_applications_renders_grid(tmp_path, bot_modules):
     asyncio.run(run())
 
 
+def test_delete_application_returns_no_active_for_deleted(tmp_path, bot_modules):
+    async def run() -> None:
+        commands = bot_modules.commands
+        bot = DummyBot(tmp_path)
+        storage = _make_local_storage(bot_modules, tmp_path)
+        client, context = _build_context(bot_modules, bot, storage)
+
+        _create_submission(client, "testbot", "s1", 100, storage)
+        client.hset("testbot:s1", mapping={"deleted_at": "2024-01-01T00:00:00"})
+
+        message = DummyMessage(chat_id=100)
+        update = SimpleNamespace(
+            message=message,
+            effective_user=SimpleNamespace(id=100),
+        )
+
+        result = await commands.delete_application(update, context)
+        assert result is commands.ConversationHandler.END
+
+        assert message.replies
+        text_value, _markup = message.replies[0]
+        assert text_value == commands.get_message("delete.no_active")
+
+    asyncio.run(run())
+
+
 def test_list_applications_renders_grid_minio(tmp_path, bot_modules):
     async def run() -> None:
         commands = bot_modules.commands
