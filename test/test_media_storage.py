@@ -60,3 +60,19 @@ def test_minio_storage_rejects_traversal(tmp_path: Path, bot_modules) -> None:
 
     with pytest.raises(FileNotFoundError):
         storage.cache_photo("../escape.jpg")
+
+
+def test_minio_storage_rehydrates_missing_local_file(
+    tmp_path: Path, bot_modules
+) -> None:
+    _client, storage = _make_minio_storage(bot_modules, tmp_path)
+    session = storage.create_session(222)
+
+    photo_path = storage.allocate_path(session, "photo.jpg")
+    photo_path.write_bytes(b"minio-cache")
+    storage.finalize_upload(session, photo_path)
+    photo_path.unlink()
+
+    cached = storage.cache_photo(str(photo_path))
+    assert cached.exists()
+    assert cached.read_bytes() == b"minio-cache"
