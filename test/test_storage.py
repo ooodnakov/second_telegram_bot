@@ -61,3 +61,14 @@ def test_get_application_store_uses_configured_prefix(bot_modules) -> None:
 
     stored = client.hgetall("custom:session:7")
     assert stored["position"] == "Tester"
+
+
+def test_int_fields_round_trip(bot_modules) -> None:
+    store = bot_modules.storage.ApplicationStore(
+        bot_modules.storage.InMemoryValkey(), prefix="int-test"
+    )
+
+    store.set_fields(1, _photo_album_last_message_id=123)
+    session = store.get(1)
+
+    assert session["_photo_album_last_message_id"] == 123

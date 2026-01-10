@@ -66,7 +66,7 @@ class ApplicationStore:
     """Read/write per-user submission state backed by Valkey."""
 
     _LIST_FIELDS = {"photos"}
-    _INT_FIELDS = {"_photo_prompt_message_id"}
+    _INT_FIELDS = {"_photo_prompt_message_id", "_photo_album_last_message_id"}
 
     def __init__(self, client: Valkey | InMemoryValkey, prefix: str) -> None:
         self._client = client
