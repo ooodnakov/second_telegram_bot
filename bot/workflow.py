@@ -29,6 +29,9 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     Update,
 )
 from telegram.error import BadRequest, TelegramError
@@ -169,7 +172,11 @@ async def skip_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} opted to skip additional photos", user.id)
-    await message.reply_text(get_message("workflow.size_prompt"), parse_mode="Markdown")
+    await message.reply_text(
+        get_message("workflow.size_prompt"),
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     return SIZE
 
 
@@ -300,6 +307,7 @@ async def _send_photo_prompt(
     user_data: dict[str, Any],
     text: str,
     parse_mode: str | None = None,
+    reply_markup: ReplyKeyboardMarkup | ReplyKeyboardRemove | None = None,
 ) -> None:
     message_update = update.message
     chat = update.effective_chat
@@ -323,7 +331,9 @@ async def _send_photo_prompt(
         except BadRequest:
             pass
 
-    message = await message_update.reply_text(text, parse_mode=parse_mode)
+    message = await message_update.reply_text(
+        text, parse_mode=parse_mode, reply_markup=reply_markup
+    )
     user_data["_photo_prompt_message_id"] = message.message_id
     user = update.effective_user
     if user is not None:
@@ -356,6 +366,11 @@ async def _handle_photo_count(
         logger.debug(
             "User {} has {} photos; prompting for optional uploads", user.id, count
         )
+        skip_keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton(SKIP_KEYWORD)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
         await _send_photo_prompt(
             update,
             context,
@@ -365,6 +380,7 @@ async def _handle_photo_count(
                 count=count,
                 keyword=SKIP_KEYWORD,
             ),
+            reply_markup=skip_keyboard,
         )
         return PHOTOS
 
@@ -375,6 +391,7 @@ async def _handle_photo_count(
         user_data,
         get_message("workflow.photos_max_prompt"),
         parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove(),
     )
     return SIZE
 
