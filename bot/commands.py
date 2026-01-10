@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import html
 from datetime import datetime
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from bot.admin import (
@@ -14,13 +17,12 @@ from bot.admin import (
     mark_application_revoked,
     record_active_user,
 )
-from bot.constants import LIST_PAGE_SIZE, MOSCOW_TZ, POSITION, UTC
+from bot.constants import LIST_PAGE_SIZE, MEDIA_ROOT, MOSCOW_TZ, POSITION, UTC
 from bot.logging import logger
 from bot.media_storage import get_media_storage
 from bot.messages import get_message
 from bot.storage import get_application_store
-from bot.workflow import _send_submission_photos
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
