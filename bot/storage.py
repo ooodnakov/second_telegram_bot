@@ -34,6 +34,12 @@ class InMemoryValkey:
             self._hashes.pop(name, None)
         return removed
 
+    def hget(self, name: str, key: str) -> str | None:
+        target = self._hashes.get(name)
+        if not target:
+            return None
+        return target.get(key)
+
     def hgetall(self, name: str) -> dict[str, str]:
         return self._hashes.get(name, {}).copy()
 

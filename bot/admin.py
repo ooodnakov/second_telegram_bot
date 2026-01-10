@@ -12,7 +12,11 @@ from valkey.exceptions import ValkeyError
 BROADCAST_INDEX_SUFFIX = "broadcasts"
 BROADCAST_KEY_PREFIX = "broadcast"
 ADMIN_SET_SUFFIX = "admins"
+ADMIN_USERNAME_TO_ID_SUFFIX = "admin_usernames"
+ADMIN_ID_TO_USERNAME_SUFFIX = "admin_ids"
 USERS_SET_SUFFIX = "users"
+USERS_USERNAME_TO_ID_SUFFIX = "user_usernames"
+USERS_ID_TO_USERNAME_SUFFIX = "user_ids"
 APPLICATIONS_SET_SUFFIX = "applications"
 
 
@@ -83,16 +87,180 @@ def remove_admin(context: Any, user_id: int) -> bool:
     except ValkeyError:
         logger.exception("Failed to remove admin {} from Valkey", user_id)
         return False
+    if removed:
+        _clear_admin_username(context, user_id)
     return bool(removed)
 
 
-def record_active_user(context: Any, user_id: int) -> None:
+def _normalize_username(username: str) -> str:
+    return username.strip().lstrip("@").lower()
+
+
+def _username_key(context: Any, suffix: str) -> str:
+    return f"{_get_prefix(context)}:{suffix}"
+
+
+def _id_key(context: Any, suffix: str) -> str:
+    return f"{_get_prefix(context)}:{suffix}"
+
+
+def set_admin_username(context: Any, user_id: int, username: str) -> bool:
+    client = _get_client(context)
+    if client is None:
+        logger.warning("Valkey client missing while storing admin username")
+        return False
+    normalized = _normalize_username(username)
+    if not normalized:
+        return False
+    try:
+        client.hset(  # type: ignore[attr-defined]
+            _username_key(context, ADMIN_USERNAME_TO_ID_SUFFIX),
+            mapping={normalized: str(user_id)},
+        )
+        client.hset(  # type: ignore[attr-defined]
+            _id_key(context, ADMIN_ID_TO_USERNAME_SUFFIX),
+            mapping={str(user_id): normalized},
+        )
+    except ValkeyError:
+        logger.exception("Failed to store username mapping for admin {}", user_id)
+        return False
+    return True
+
+
+def get_admin_id_for_username(context: Any, username: str) -> int | None:
+    client = _get_client(context)
+    if client is None:
+        return None
+    normalized = _normalize_username(username)
+    if not normalized:
+        return None
+    try:
+        raw = client.hget(  # type: ignore[attr-defined]
+            _username_key(context, ADMIN_USERNAME_TO_ID_SUFFIX),
+            normalized,
+        )
+    except ValkeyError:
+        logger.exception("Failed to resolve admin id for username {}", normalized)
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(_decode(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def get_admin_username_for_id(context: Any, user_id: int) -> str | None:
+    client = _get_client(context)
+    if client is None:
+        return None
+    try:
+        raw = client.hget(  # type: ignore[attr-defined]
+            _id_key(context, ADMIN_ID_TO_USERNAME_SUFFIX),
+            str(user_id),
+        )
+    except ValkeyError:
+        logger.exception("Failed to resolve username for admin id {}", user_id)
+        return None
+    if not raw:
+        return None
+    return _decode(raw)
+
+
+def _clear_admin_username(context: Any, user_id: int) -> None:
+    client = _get_client(context)
+    if client is None:
+        return
+    try:
+        raw = client.hget(  # type: ignore[attr-defined]
+            _id_key(context, ADMIN_ID_TO_USERNAME_SUFFIX),
+            str(user_id),
+        )
+        if raw:
+            username = _decode(raw)
+            client.hdel(  # type: ignore[attr-defined]
+                _username_key(context, ADMIN_USERNAME_TO_ID_SUFFIX),
+                username,
+            )
+        client.hdel(  # type: ignore[attr-defined]
+            _id_key(context, ADMIN_ID_TO_USERNAME_SUFFIX),
+            str(user_id),
+        )
+    except ValkeyError:
+        logger.exception("Failed to clear username mapping for admin {}", user_id)
+
+
+def set_user_username(context: Any, user_id: int, username: str | None) -> bool:
+    client = _get_client(context)
+    if client is None:
+        return False
+    normalized = _normalize_username(username or "")
+    if not normalized:
+        return False
+    try:
+        client.hset(  # type: ignore[attr-defined]
+            _username_key(context, USERS_USERNAME_TO_ID_SUFFIX),
+            mapping={normalized: str(user_id)},
+        )
+        client.hset(  # type: ignore[attr-defined]
+            _id_key(context, USERS_ID_TO_USERNAME_SUFFIX),
+            mapping={str(user_id): normalized},
+        )
+    except ValkeyError:
+        logger.exception("Failed to store username mapping for user {}", user_id)
+        return False
+    return True
+
+
+def get_user_id_for_username(context: Any, username: str) -> int | None:
+    client = _get_client(context)
+    if client is None:
+        return None
+    normalized = _normalize_username(username)
+    if not normalized:
+        return None
+    try:
+        raw = client.hget(  # type: ignore[attr-defined]
+            _username_key(context, USERS_USERNAME_TO_ID_SUFFIX),
+            normalized,
+        )
+    except ValkeyError:
+        logger.exception("Failed to resolve user id for username {}", normalized)
+        return None
+    if raw is None:
+        return None
+    try:
+        return int(_decode(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def get_username_for_user_id(context: Any, user_id: int) -> str | None:
+    client = _get_client(context)
+    if client is None:
+        return None
+    try:
+        raw = client.hget(  # type: ignore[attr-defined]
+            _id_key(context, USERS_ID_TO_USERNAME_SUFFIX),
+            str(user_id),
+        )
+    except ValkeyError:
+        logger.exception("Failed to resolve username for user id {}", user_id)
+        return None
+    if not raw:
+        return None
+    return _decode(raw)
+
+
+def record_active_user(context: Any, user_id: int, username: str | None = None) -> None:
     client = _get_client(context)
     if client is None:
         return
     key = f"{_get_prefix(context)}:{USERS_SET_SUFFIX}"
     try:
         client.sadd(key, str(user_id))  # type: ignore[attr-defined]
+        if username:
+            set_user_username(context, user_id, username)
     except ValkeyError:
         logger.exception("Failed to track active user {} in Valkey", user_id)
 
@@ -465,7 +633,11 @@ __all__ = [
     "fetch_all_submissions",
     "fetch_user_submissions",
     "get_admins",
+    "get_admin_id_for_username",
+    "get_admin_username_for_id",
     "get_super_admins",
+    "get_user_id_for_username",
+    "get_username_for_user_id",
     "is_admin",
     "is_super_admin",
     "list_active_users",
@@ -479,6 +651,8 @@ __all__ = [
     "record_active_user",
     "recipients_for_audience",
     "save_broadcast_record",
+    "set_admin_username",
+    "set_user_username",
     "update_broadcast_record",
     "update_application_fields",
 ]

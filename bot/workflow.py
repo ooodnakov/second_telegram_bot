@@ -555,7 +555,7 @@ def _persist_application(
         valkey_client.hset(valkey_key, mapping=record)
         valkey_client.sadd(user_applications_key, valkey_key)
         valkey_client.sadd(f"{prefix}:applications", valkey_key)
-        record_active_user(context, user.id)
+        record_active_user(context, user.id, user.username)
         logger.info(
             "Persisted submission for user {} under key {}",
             user.id,

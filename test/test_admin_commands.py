@@ -156,6 +156,32 @@ def test_receive_admin_id_accepts_username(bot_modules, tmp_path) -> None:
         admin_commands.get_message("admin.add_success", user_id=777)
     ]
     assert 777 in admin_module.get_admins(context)
+    assert (
+        admin_module.get_admin_id_for_username(context, "@new_admin") == 777
+    )
+
+
+def test_receive_admin_id_uses_stored_username(bot_modules, tmp_path) -> None:
+    admin_commands = bot_modules.admin_commands
+    admin_module = bot_modules.admin
+
+    storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
+    context = _build_context(bot_modules, SimpleNamespace(), storage)
+    admin_module.set_user_username(context, 888, "stored_admin")
+    message = DummyMessage("@stored_admin")
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
+
+    async def invoke() -> None:
+        result = await admin_commands.receive_admin_id(update, context)
+        assert result is admin_commands.ConversationHandler.END
+
+    with _patched_telegram_types(admin_commands):
+        asyncio.run(invoke())
+
+    assert message.replies == [
+        admin_commands.get_message("admin.add_success", user_id=888)
+    ]
+    assert 888 in admin_module.get_admins(context)
 
 
 def test_receive_admin_id_reports_unknown_username(bot_modules, tmp_path) -> None:
@@ -173,7 +199,7 @@ def test_receive_admin_id_reports_unknown_username(bot_modules, tmp_path) -> Non
 
     async def invoke() -> None:
         result = await admin_commands.receive_admin_id(update, context)
-        assert result == admin_commands.ADMIN_ADD_ADMIN_WAIT_ID
+        assert result is admin_commands.ConversationHandler.END
 
     with _patched_telegram_types(admin_commands):
         asyncio.run(invoke())
@@ -202,12 +228,65 @@ def test_receive_admin_id_reports_lookup_failure(bot_modules, tmp_path) -> None:
 
     async def invoke() -> None:
         result = await admin_commands.receive_admin_id(update, context)
-        assert result == admin_commands.ADMIN_ADD_ADMIN_WAIT_ID
+        assert result is admin_commands.ConversationHandler.END
 
     asyncio.run(invoke())
 
     assert message.replies == [admin_commands.get_message("admin.user_lookup_error")]
     assert admin_module.get_admins(context) == set()
+
+
+def test_show_stats_summarizes_activity(bot_modules) -> None:
+    admin_commands = bot_modules.admin_commands
+    admin_module = bot_modules.admin
+    storage = bot_modules.storage
+
+    client = storage.InMemoryValkey()
+    prefix = "testbot"
+    bot_data = {
+        "valkey_client": client,
+        "valkey_prefix": prefix,
+        "super_admin_ids": [1],
+    }
+    context = SimpleNamespace(application=SimpleNamespace(bot_data=bot_data))
+
+    admin_module.add_admin(context, 2)
+    admin_module.record_active_user(context, 10, "user_a")
+    admin_module.record_active_user(context, 11, "user_b")
+
+    active_key = f"{prefix}:app:1"
+    reviewed_key = f"{prefix}:app:2"
+    revoked_key = f"{prefix}:app:3"
+    client.sadd(f"{prefix}:applications", active_key)
+    client.sadd(f"{prefix}:applications", reviewed_key)
+    client.sadd(f"{prefix}:applications", revoked_key)
+    client.hset(active_key, mapping={"session_key": "1"})
+    client.hset(reviewed_key, mapping={"session_key": "2", "reviewed_at": "now"})
+    client.hset(revoked_key, mapping={"session_key": "3", "revoked_at": "now"})
+
+    class DummyMessage:
+        def __init__(self) -> None:
+            self.replies: list[tuple[str, str | None]] = []
+
+        async def reply_text(self, text: str, parse_mode: str | None = None) -> None:
+            self.replies.append((text, parse_mode))
+
+    message = DummyMessage()
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=2))
+
+    async def invoke() -> None:
+        await admin_commands.show_stats(update, context)
+
+    asyncio.run(invoke())
+
+    assert len(message.replies) == 1
+    text, parse_mode = message.replies[0]
+    assert parse_mode == "Markdown"
+    assert "Статистика" in text
+    assert "Администраторы: 1" in text
+    assert "Суперадминистраторы: 1" in text
+    assert "Активные пользователи: 2" in text
+    assert "Заявки: всего 3" in text
 
 
 def _build_submission_with_photos(storage, session_key: str) -> dict[str, str]:

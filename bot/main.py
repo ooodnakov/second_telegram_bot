@@ -15,6 +15,7 @@ from bot.admin_commands import (
     receive_broadcast_schedule,
     receive_remove_admin_id,
     show_admin_roster,
+    show_stats,
     show_broadcast_history,
     show_scheduled_broadcasts,
     start_add_admin,
@@ -155,6 +156,7 @@ def main() -> None:
     app.add_handler(CommandHandler("revoke", revoke_application))
     app.add_handler(CommandHandler("applications", view_all_applications))
     app.add_handler(CommandHandler("admins", show_admin_roster))
+    app.add_handler(CommandHandler("stats", show_stats))
     app.add_handler(CommandHandler("broadcast_history", show_broadcast_history))
     app.add_handler(CommandHandler("scheduled", show_scheduled_broadcasts))
     app.add_handler(

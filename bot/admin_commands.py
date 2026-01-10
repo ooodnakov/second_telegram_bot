@@ -16,15 +16,20 @@ from bot.admin import (
     clear_application_review,
     fetch_all_submissions,
     get_admins,
+    get_admin_id_for_username,
+    get_admin_username_for_id,
     get_super_admins,
+    get_user_id_for_username,
     is_admin,
     is_super_admin,
+    list_active_users,
     list_broadcast_records,
     load_broadcast_record,
     mark_application_reviewed,
     recipients_for_audience,
     remove_admin,
     save_broadcast_record,
+    set_admin_username,
     update_broadcast_record,
 )
 from bot.constants import (
@@ -85,6 +90,12 @@ async def _resolve_admin_identifier(
         return int(numeric_text), None, numeric_text
 
     username = text if text.startswith("@") else f"@{text}"
+    stored_id = get_admin_id_for_username(context, username)
+    if stored_id is not None:
+        return stored_id, None, username
+    stored_user_id = get_user_id_for_username(context, username)
+    if stored_user_id is not None:
+        return stored_user_id, None, username
     bot = getattr(context, "bot", None)
     if bot is None or not hasattr(bot, "get_chat"):
         logger.warning(
@@ -108,6 +119,7 @@ async def _resolve_admin_identifier(
         return None, "lookup_failed", username
 
     chat_id = getattr(chat, "id", None)
+    chat_username = getattr(chat, "username", None)
     chat_type = getattr(chat, "type", None)
     if isinstance(chat_type, ChatType):
         chat_type_str = chat_type.value
@@ -126,12 +138,15 @@ async def _resolve_admin_identifier(
         return None, "not_found", username
 
     try:
-        return int(chat_id), None, username
+        resolved_id = int(chat_id)
     except (TypeError, ValueError):
         logger.warning(
             "Resolved identifier %s with non-integer id %s", username, chat_id
         )
         return None, "not_found", username
+    if chat_username:
+        set_admin_username(context, resolved_id, chat_username)
+    return resolved_id, None, username
 
 
 async def view_all_applications(
@@ -441,7 +456,7 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await message.reply_text(get_message("admin.user_lookup_error"))
         else:
             await message.reply_text(get_message("admin.add_invalid"))
-        return ADMIN_ADD_ADMIN_WAIT_ID
+        return ConversationHandler.END
 
     if is_admin(context, new_admin_id):
         await message.reply_text(get_message("admin.add_already", user_id=new_admin_id))
@@ -1028,8 +1043,14 @@ async def show_admin_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lines.append(get_message("admin.roster_super_admins"))
     if super_admins:
         for index, admin_id in enumerate(super_admins, start=1):
+            username_suffix = await _lookup_username_suffix(context, admin_id)
             lines.append(
-                get_message("admin.roster_entry", index=index, user_id=admin_id)
+                get_message(
+                    "admin.roster_entry",
+                    index=index,
+                    user_id=admin_id,
+                    username_suffix=username_suffix,
+                )
             )
     else:
         lines.append(get_message("admin.roster_empty"))
@@ -1038,13 +1059,92 @@ async def show_admin_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lines.append(get_message("admin.roster_admins"))
     if admin_ids:
         for index, admin_id in enumerate(admin_ids, start=1):
+            username_suffix = await _lookup_username_suffix(context, admin_id)
             lines.append(
-                get_message("admin.roster_entry", index=index, user_id=admin_id)
+                get_message(
+                    "admin.roster_entry",
+                    index=index,
+                    user_id=admin_id,
+                    username_suffix=username_suffix,
+                )
             )
     else:
         lines.append(get_message("admin.roster_empty"))
 
     await message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def show_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display basic usage statistics for admins."""
+
+    user = update.effective_user
+    message = update.message
+    if user is None or message is None:
+        logger.warning(f"/stats invoked without message or user: {update}")
+        return
+
+    if not is_admin(context, user.id):
+        await message.reply_text(get_message("admin.not_authorized"))
+        logger.info(
+            "User %s attempted to view stats without admin rights",
+            user.id,
+        )
+        return
+
+    submissions = fetch_all_submissions(context)
+    if submissions is None:
+        await message.reply_text(get_message("general.storage_unavailable_support"))
+        logger.error("Valkey unavailable when admin %s requested stats", user.id)
+        return
+
+    total = len(submissions)
+    reviewed = sum(1 for item in submissions if item.get("reviewed_at"))
+    revoked = sum(1 for item in submissions if item.get("revoked_at"))
+    pending = total - reviewed - revoked
+
+    super_admins = sorted(get_super_admins(context))
+    admin_ids = sorted(get_admins(context) - set(super_admins))
+    active_users = list_active_users(context)
+
+    lines = [
+        get_message("admin.stats_header"),
+        get_message("admin.stats_admins", count=len(admin_ids)),
+        get_message("admin.stats_super_admins", count=len(super_admins)),
+        get_message("admin.stats_active_users", count=len(active_users)),
+        get_message(
+            "admin.stats_submissions",
+            total=total,
+            pending=pending,
+            reviewed=reviewed,
+            revoked=revoked,
+        ),
+    ]
+
+    await message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def _lookup_username_suffix(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> str:
+    stored_username = get_admin_username_for_id(context, user_id)
+    if stored_username:
+        return f" (@{stored_username})"
+    bot = getattr(context, "bot", None)
+    if bot is None:
+        return ""
+    get_chat = getattr(bot, "get_chat", None)
+    if get_chat is None:
+        return ""
+    try:
+        chat = await get_chat(user_id)
+    except Exception as exc:  # pragma: no cover - depends on Telegram API
+        logger.debug("Failed to resolve username for admin {}: {}", user_id, exc)
+        return ""
+    username = getattr(chat, "username", None)
+    if not username:
+        return ""
+    set_admin_username(context, user_id, username)
+    return f" (@{username})"
 
 
 async def execute_broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:

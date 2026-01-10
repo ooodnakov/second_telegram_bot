@@ -44,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info("User {} invoked /start", user.id)
-    record_active_user(context, user.id)
+    record_active_user(context, user.id, user.username)
 
     await update.message.reply_text(get_message("start.greeting"))
     await update.message.reply_text(get_message("start.new_instruction"))
@@ -68,7 +68,7 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    record_active_user(context, user.id)
+    record_active_user(context, user.id, user.username)
 
     await update.message.reply_text(
         get_message("workflow.position_prompt"),
@@ -109,6 +109,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_lines.append(get_message("help.admin_broadcast"))
         text_lines.append(get_message("help.admin_history"))
         text_lines.append(get_message("help.admin_scheduled"))
+        text_lines.append(get_message("help.admin_stats"))
         text_lines.append("")
 
     if is_super_admin(context, user.id):
