@@ -144,6 +144,8 @@ async def _resolve_admin_identifier(
         return None, "not_found", username
     if chat_username:
         set_admin_username(context, resolved_id, chat_username)
+    else:
+        set_admin_username(context, resolved_id, username)
     return resolved_id, None, username
 
 

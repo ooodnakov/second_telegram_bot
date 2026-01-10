@@ -410,7 +410,9 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cover_path is None:
         await update.message.reply_text(text, reply_markup=keyboard)
     else:
-        chat = update.effective_chat
+        chat = getattr(update, "effective_chat", None)
+        if chat is None and update.message is not None:
+            chat = update.message.chat
         if chat is None:
             await update.message.reply_text(text, reply_markup=keyboard)
         else:
@@ -473,15 +475,8 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     state["page"] = current_page
     cover_path = _list_cover_path(context)
     if cover_path is not None and query.message is not None:
-        photo_stream = cover_path.open("rb")
         try:
-            media = InputMediaPhoto(media=photo_stream, caption=text)
-            await context.bot.edit_message_media(
-                chat_id=query.message.chat_id,
-                message_id=query.message.message_id,
-                media=media,
-                reply_markup=keyboard,
-            )
+            await query.edit_message_caption(caption=text, reply_markup=keyboard)
         except BadRequest as exc:
             lowered = str(exc).lower()
             if "message is not modified" in lowered:
@@ -490,12 +485,7 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     user.id,
                 )
                 return
-            try:
-                await query.edit_message_caption(caption=text, reply_markup=keyboard)
-            except BadRequest:
-                await query.edit_message_text(text, reply_markup=keyboard)
-        finally:
-            photo_stream.close()
+            await query.edit_message_text(text, reply_markup=keyboard)
     else:
         try:
             await query.edit_message_text(text, reply_markup=keyboard)

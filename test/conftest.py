@@ -32,6 +32,39 @@ def stub_external_modules() -> Iterator[None]:
             def __init__(self, inline_keyboard: list[list[object]] | None = None):
                 self.inline_keyboard = inline_keyboard or []
 
+        class _KeyboardButton:
+            def __init__(
+                self,
+                text: str | None = None,
+                *,
+                request_contact: bool | None = None,
+                request_location: bool | None = None,
+                **kwargs,
+            ) -> None:
+                self.text = text
+                self.request_contact = request_contact
+                self.request_location = request_location
+                self.extra = kwargs
+
+        class _ReplyKeyboardMarkup:
+            def __init__(
+                self,
+                keyboard: list[list[object]] | None = None,
+                *,
+                resize_keyboard: bool | None = None,
+                one_time_keyboard: bool | None = None,
+                **kwargs,
+            ) -> None:
+                self.keyboard = keyboard or []
+                self.resize_keyboard = resize_keyboard
+                self.one_time_keyboard = one_time_keyboard
+                self.extra = kwargs
+
+        class _ReplyKeyboardRemove:
+            def __init__(self, *, selective: bool | None = None, **kwargs) -> None:
+                self.selective = selective
+                self.extra = kwargs
+
         class _InputMediaPhoto:
             def __init__(
                 self,
@@ -48,6 +81,9 @@ def stub_external_modules() -> Iterator[None]:
 
         telegram_module.InlineKeyboardButton = _InlineKeyboardButton
         telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
+        telegram_module.KeyboardButton = _KeyboardButton
+        telegram_module.ReplyKeyboardMarkup = _ReplyKeyboardMarkup
+        telegram_module.ReplyKeyboardRemove = _ReplyKeyboardRemove
         telegram_module.InputMediaPhoto = _InputMediaPhoto
         monkeypatch.setitem(sys.modules, "telegram", telegram_module)
 
