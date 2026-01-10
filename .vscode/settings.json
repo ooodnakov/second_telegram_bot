@@ -28,8 +28,6 @@
         "**/__pycache__/**": true
     },
     "python.testing.pytestArgs": [
-        "-n",
-        "auto",
         "test"
     ],
     "python.testing.unittestEnabled": false,
