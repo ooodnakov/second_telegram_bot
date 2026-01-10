@@ -62,7 +62,7 @@ async def new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         store = get_application_store(context)
     except RuntimeError:
-        logger.exception("Failed to obtain application store for user %s", user.id)
+        logger.exception(f"Failed to obtain application store for user {user.id}")
         await update.message.reply_text(
             get_message("general.storage_unavailable_support")
         )
@@ -671,7 +671,7 @@ async def _navigate_list_photo(
     session_key = data[2]
     user = query.from_user
     if user is None:
-        logger.warning("List photo navigation missing user: %s", update)
+        logger.warning(f"List photo navigation missing user: {update}")
         return
 
     state = _get_or_create_list_state(context)
@@ -832,7 +832,7 @@ async def refresh_application_detail(
     state["current_session_key"] = session_key
 
     if send_photos:
-        logger.debug("Skipped sending extra photos during list refresh for %s", user_id)
+        logger.debug(f"Skipped sending extra photos during list refresh for {user_id}")
 
 
 def get_cached_submission(
@@ -1041,7 +1041,7 @@ async def revoke_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
     cache = _build_revoke_cache(context, user.id)
     if cache is None:
         await message.reply_text(get_message("general.storage_unavailable"))
-        logger.error("Valkey unavailable when user %s attempted revocation", user.id)
+        logger.error(f"Valkey unavailable when user {user.id} attempted revocation")
         return ConversationHandler.END
 
     active_items = [
@@ -1049,7 +1049,7 @@ async def revoke_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     if not active_items:
         await message.reply_text(get_message("revoke.no_active"))
-        logger.info("User %s has no active submissions to revoke", user.id)
+        logger.info(f"User {user.id} has no active submissions to revoke")
         return ConversationHandler.END
 
     lines = [get_message("revoke.prompt")]
@@ -1088,7 +1088,7 @@ async def revoke_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
-    logger.debug("Presented revocation options to user %s", user.id)
+    logger.debug(f"Presented revocation options to user {user.id}")
     return ConversationHandler.END
 
 
@@ -1108,13 +1108,13 @@ async def handle_revoke_callback(
 
     user = query.from_user
     if user is None:
-        logger.warning("Revoke callback missing user: %s", update)
+        logger.warning(f"Revoke callback missing user: {update}")
         return
 
     if len(data) >= 2 and data[1] == "cancel":
         await query.edit_message_text(get_message("revoke.cancelled"))
         context.user_data.pop(REVOKE_CACHE_KEY, None)  # type: ignore[index]
-        logger.debug("User %s cancelled revocation", user.id)
+        logger.debug(f"User {user.id} cancelled revocation")
         return
 
     if len(data) >= 3 and data[1] == "select":
@@ -1188,7 +1188,7 @@ async def handle_revoke_callback(
         if status_suffix:
             message_text = f"{message_text} {html.escape(status_suffix)}"
         await query.edit_message_text(message_text)
-        logger.info("User %s revoked submission %s", user.id, session_key)
+        logger.info(f"User {user.id} revoked submission {session_key}")
         return
 
 
@@ -1202,7 +1202,7 @@ async def delete_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
     cache = _build_delete_cache(context, user.id)
     if cache is None:
         await message.reply_text(get_message("general.storage_unavailable"))
-        logger.error("Valkey unavailable when user %s attempted deletion", user.id)
+        logger.error(f"Valkey unavailable when user {user.id} attempted deletion")
         return ConversationHandler.END
 
     active_items = [
@@ -1210,7 +1210,7 @@ async def delete_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     if not active_items:
         await message.reply_text(get_message("delete.no_active"))
-        logger.info("User %s has no submissions to delete", user.id)
+        logger.info(f"User {user.id} has no submissions to delete")
         return ConversationHandler.END
 
     lines = [get_message("delete.prompt")]
@@ -1249,7 +1249,7 @@ async def delete_application(update: Update, context: ContextTypes.DEFAULT_TYPE)
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
-    logger.debug("Presented deletion options to user %s", user.id)
+    logger.debug(f"Presented deletion options to user {user.id}")
     return ConversationHandler.END
 
 
@@ -1269,13 +1269,13 @@ async def handle_delete_callback(
 
     user = query.from_user
     if user is None:
-        logger.warning("Delete callback missing user: %s", update)
+        logger.warning(f"Delete callback missing user: {update}")
         return
 
     if len(data) >= 2 and data[1] == "cancel":
         await query.edit_message_text(get_message("delete.cancelled"))
         context.user_data.pop(DELETE_CACHE_KEY, None)  # type: ignore[index]
-        logger.debug("User %s cancelled deletion", user.id)
+        logger.debug(f"User {user.id} cancelled deletion")
         return
 
     if len(data) >= 3 and data[1] == "select":
@@ -1362,7 +1362,7 @@ async def handle_delete_callback(
         await query.edit_message_text(
             get_message("delete.success"), reply_markup=keyboard
         )
-        logger.info("User %s deleted submission %s", user.id, session_key)
+        logger.info(f"User {user.id} deleted submission {session_key}")
         return
 
 

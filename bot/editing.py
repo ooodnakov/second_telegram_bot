@@ -63,16 +63,12 @@ def _ensure_submission(
     submission = get_cached_submission(context, user_id, session_key)
     if submission is None:
         logger.warning(
-            "Submission %s missing for editing request by user %s",
-            session_key,
-            user_id,
+            f"Submission {session_key} missing for editing request by user {user_id}"
         )
     elif submission.get("user_id") != str(user_id):
         logger.warning(
-            "User %s attempted to edit submission %s owned by %s",
-            user_id,
-            session_key,
-            submission.get("user_id"),
+            f"User {user_id} attempted to edit submission {session_key} owned by "
+            f"{submission.get('user_id')}"
         )
         return None
     return submission
@@ -83,13 +79,13 @@ async def start_edit_position(
 ) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
-        logger.warning("Position edit invoked without callback query: %s", update)
+        logger.warning(f"Position edit invoked without callback query: {update}")
         return ConversationHandler.END
 
     data = (query.data or "").split(":", 2)
     if len(data) != 3 or data[0] != "edit" or data[1] != "position":
         await query.answer()
-        logger.warning("Unexpected position edit payload: %s", query.data)
+        logger.warning(f"Unexpected position edit payload: {query.data}")
         return ConversationHandler.END
 
     session_key = data[2]
@@ -105,7 +101,7 @@ async def start_edit_position(
     prompt = get_message("edit.position_prompt", current=current_value)
     if query.message is not None:
         await query.message.reply_text(prompt)
-    logger.debug("Prompted user %s to edit position for %s", user_id, session_key)
+    logger.debug(f"Prompted user {user_id} to edit position for {session_key}")
     return EDIT_POSITION
 
 
@@ -113,13 +109,13 @@ async def receive_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Position update received without message or user: %s", update)
+        logger.warning(f"Position update received without message or user: {update}")
         return ConversationHandler.END
 
     state = _get_edit_state(context)
     session_key = state.get("session_key")
     if not session_key or state.get("user_id") != user.id:
-        logger.warning("Position update missing edit state for user %s", user.id)
+        logger.warning(f"Position update missing edit state for user {user.id}")
         await message.reply_text(get_message("general.session_missing"))
         return ConversationHandler.END
 
@@ -135,7 +131,7 @@ async def receive_position(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     update_cached_submission(context, user.id, session_key, position=new_value)
     await refresh_application_detail(context, user.id, session_key)
     await message.reply_text(get_message("edit.position_saved"))
-    logger.info("User %s updated position for %s", user.id, session_key)
+    logger.info(f"User {user.id} updated position for {session_key}")
     _clear_edit_state(context)
     return ConversationHandler.END
 
@@ -145,13 +141,13 @@ async def start_edit_description(
 ) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
-        logger.warning("Description edit invoked without callback query: %s", update)
+        logger.warning(f"Description edit invoked without callback query: {update}")
         return ConversationHandler.END
 
     data = (query.data or "").split(":", 2)
     if len(data) != 3 or data[0] != "edit" or data[1] != "description":
         await query.answer()
-        logger.warning("Unexpected description edit payload: %s", query.data)
+        logger.warning(f"Unexpected description edit payload: {query.data}")
         return ConversationHandler.END
 
     session_key = data[2]
@@ -167,7 +163,7 @@ async def start_edit_description(
     prompt = get_message("edit.description_prompt", current=current_value)
     if query.message is not None:
         await query.message.reply_text(prompt)
-    logger.debug("Prompted user %s to edit description for %s", user_id, session_key)
+    logger.debug(f"Prompted user {user_id} to edit description for {session_key}")
     return EDIT_DESCRIPTION
 
 
@@ -177,7 +173,7 @@ async def receive_description(
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Description update received without message: %s", update)
+        logger.warning(f"Description update received without message: {update}")
         return ConversationHandler.END
 
     state = _get_edit_state(context)
@@ -198,7 +194,7 @@ async def receive_description(
     update_cached_submission(context, user.id, session_key, description=new_value)
     await refresh_application_detail(context, user.id, session_key)
     await message.reply_text(get_message("edit.description_saved"))
-    logger.info("User %s updated description for %s", user.id, session_key)
+    logger.info(f"User {user.id} updated description for {session_key}")
     _clear_edit_state(context)
     return ConversationHandler.END
 
@@ -208,13 +204,13 @@ async def start_edit_condition(
 ) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
-        logger.warning("Condition edit invoked without callback query: %s", update)
+        logger.warning(f"Condition edit invoked without callback query: {update}")
         return ConversationHandler.END
 
     data = (query.data or "").split(":", 2)
     if len(data) != 3 or data[0] != "edit" or data[1] != "condition":
         await query.answer()
-        logger.warning("Unexpected condition edit payload: %s", query.data)
+        logger.warning(f"Unexpected condition edit payload: {query.data}")
         return ConversationHandler.END
 
     session_key = data[2]
@@ -245,7 +241,7 @@ async def start_edit_condition(
         await query.message.reply_text(
             get_message("edit.condition_prompt"), reply_markup=keyboard
         )
-    logger.debug("Prompted user %s to edit condition for %s", user_id, session_key)
+    logger.debug(f"Prompted user {user_id} to edit condition for {session_key}")
     return EDIT_CONDITION
 
 
@@ -254,13 +250,13 @@ async def receive_condition_choice(
 ) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
-        logger.warning("Condition choice received without callback query: %s", update)
+        logger.warning(f"Condition choice received without callback query: {update}")
         return ConversationHandler.END
 
     data = (query.data or "").split(":", 4)
     if len(data) != 4 or data[0] != "edit_condition" or data[1] != "set":
         await query.answer()
-        logger.warning("Unexpected condition selection payload: %s", query.data)
+        logger.warning(f"Unexpected condition selection payload: {query.data}")
         return ConversationHandler.END
 
     session_key = data[2]
@@ -279,7 +275,7 @@ async def receive_condition_choice(
     condition_value = condition_map.get(condition_key)
     if condition_value is None:
         await query.answer()
-        logger.warning("Unknown condition key %s in edit flow", condition_key)
+        logger.warning(f"Unknown condition key {condition_key} in edit flow")
         return ConversationHandler.END
 
     await query.answer()
@@ -297,8 +293,8 @@ async def receive_condition_choice(
     try:
         await query.edit_message_text(get_message("edit.condition_saved"))
     except BadRequest:
-        logger.debug("Condition prompt message missing for user %s", user_id)
-    logger.info("User %s updated condition for %s", user_id, session_key)
+        logger.debug(f"Condition prompt message missing for user {user_id}")
+    logger.info(f"User {user_id} updated condition for {session_key}")
     _clear_edit_state(context)
     return ConversationHandler.END
 
@@ -306,13 +302,13 @@ async def receive_condition_choice(
 async def start_edit_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     if query is None or query.from_user is None:
-        logger.warning("Photo edit invoked without callback query: %s", update)
+        logger.warning(f"Photo edit invoked without callback query: {update}")
         return ConversationHandler.END
 
     data = (query.data or "").split(":", 2)
     if len(data) != 3 or data[0] != "edit" or data[1] != "photos":
         await query.answer()
-        logger.warning("Unexpected photo edit payload: %s", query.data)
+        logger.warning(f"Unexpected photo edit payload: {query.data}")
         return ConversationHandler.END
 
     session_key = data[2]
@@ -333,7 +329,7 @@ async def start_edit_photos(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.message.reply_text(
             get_message("edit.photos_prompt", keyword=SKIP_KEYWORD)
         )
-    logger.debug("Prompted user %s to upload new photos for %s", user_id, session_key)
+    logger.debug(f"Prompted user {user_id} to upload new photos for {session_key}")
     return EDIT_PHOTOS
 
 
@@ -343,7 +339,7 @@ async def receive_photo_upload(
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Photo upload received without message: %s", update)
+        logger.warning(f"Photo upload received without message: {update}")
         return ConversationHandler.END
 
     state = _get_edit_state(context)
@@ -373,12 +369,10 @@ async def receive_photo_upload(
         handle = storage.finalize_upload(session, target_path)
         photos.append(handle)
         logger.info(
-            "User %s uploaded photo %s for session %s", user.id, filename, session_key
+            f"User {user.id} uploaded photo {filename} for session {session_key}"
         )
     except (TelegramError, OSError):  # pragma: no cover - network/IO related
-        logger.exception(
-            "Failed to download photo for session %s during edit", session_key
-        )
+        logger.exception(f"Failed to download photo for session {session_key} during edit")
         await message.reply_text(get_message("edit.update_failed"))
         _clear_edit_state(context)
         return ConversationHandler.END
@@ -400,7 +394,7 @@ async def finalize_photo_upload(
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Photo finalization received without message: %s", update)
+        logger.warning(f"Photo finalization received without message: {update}")
         return ConversationHandler.END
 
     state = _get_edit_state(context)
@@ -428,7 +422,7 @@ async def finalize_photo_upload(
     )
     await refresh_application_detail(context, user.id, session_key, send_photos=True)
     await message.reply_text(get_message("edit.photos_saved"))
-    logger.info("User %s updated photos for %s", user.id, session_key)
+    logger.info(f"User {user.id} updated photos for {session_key}")
     _clear_edit_state(context)
     return ConversationHandler.END
 

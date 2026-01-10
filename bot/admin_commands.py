@@ -87,7 +87,9 @@ async def _resolve_admin_identifier(
     username = text if text.startswith("@") else f"@{text}"
     bot = getattr(context, "bot", None)
     if bot is None or not hasattr(bot, "get_chat"):
-        logger.warning("Context bot missing while resolving admin identifier %s", text)
+        logger.warning(
+            f"Context bot missing while resolving admin identifier {text}"
+        )
         return None, "not_found", username
 
     try:
@@ -95,14 +97,14 @@ async def _resolve_admin_identifier(
     except BadRequest as exc:
         message = (getattr(exc, "message", None) or str(exc) or "").strip()
         if "chat not found" in message.lower() or "user not found" in message.lower():
-            logger.info("Failed to resolve admin identifier %s: %s", username, message)
+            logger.info(f"Failed to resolve admin identifier {username}: {message}")
             return None, "not_found", username
         logger.warning(
             "Bad request while resolving admin identifier %s: %s", username, message
         )
         return None, "lookup_failed", username
     except TelegramError as exc:  # pragma: no cover - network errors
-        logger.error("Telegram error resolving admin identifier %s: %s", username, exc)
+        logger.error(f"Telegram error resolving admin identifier {username}: {exc}")
         return None, "lookup_failed", username
 
     chat_id = getattr(chat, "id", None)
@@ -141,7 +143,7 @@ async def view_all_applications(
     message = update.message
     chat = update.effective_chat
     if user is None or message is None or chat is None:
-        logger.warning("Admin view invoked without full update: %s", update)
+        logger.warning(f"Admin view invoked without full update: {update}")
         return
 
     if not is_admin(context, user.id):
@@ -154,7 +156,7 @@ async def view_all_applications(
     submissions = fetch_all_submissions(context)
     if submissions is None:
         await message.reply_text(get_message("general.storage_unavailable_support"))
-        logger.error("Valkey unavailable when admin %s requested submissions", user.id)
+        logger.error(f"Valkey unavailable when admin {user.id} requested submissions")
         return
 
     if not submissions:
@@ -209,7 +211,7 @@ async def navigate_applications(
         ordered = state.get("ordered", {})
         if mode not in ordered:
             await query.answer()
-            logger.warning("Unknown mode %s in admin navigation", mode)
+            logger.warning(f"Unknown mode {mode} in admin navigation")
             return
         indexes = state.setdefault("indexes", {})
         index = indexes.get(mode, 0)
@@ -244,7 +246,7 @@ async def navigate_applications(
         ordered = state.get("ordered", {})
         if mode not in ordered:
             await query.answer()
-            logger.warning("Unknown admin mode %s", mode)
+            logger.warning(f"Unknown admin mode {mode}")
             return
         state["mode"] = mode
         state.setdefault("indexes", {}).setdefault(mode, 0)
@@ -405,7 +407,7 @@ async def start_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     user = update.effective_user
     if update.message is None or user is None:
-        logger.warning("/addadmin invoked without message or user: %s", update)
+        logger.warning(f"/addadmin invoked without message or user: {update}")
         return ConversationHandler.END
 
     if not is_super_admin(context, user.id):
@@ -425,7 +427,7 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Admin id reception invoked without message or user: %s", update)
+        logger.warning(f"Admin id reception invoked without message or user: {update}")
         return ConversationHandler.END
 
     text = (message.text or "").strip()
@@ -447,10 +449,10 @@ async def receive_admin_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if add_admin(context, new_admin_id):
         await message.reply_text(get_message("admin.add_success", user_id=new_admin_id))
-        logger.info("Super admin %s granted admin rights to %s", user.id, new_admin_id)
+        logger.info(f"Super admin {user.id} granted admin rights to {new_admin_id}")
     else:
         await message.reply_text(get_message("general.storage_unavailable_support"))
-        logger.error("Failed to add admin %s due to storage issue", new_admin_id)
+        logger.error(f"Failed to add admin {new_admin_id} due to storage issue")
     return ConversationHandler.END
 
 
@@ -459,7 +461,7 @@ async def start_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     user = update.effective_user
     if update.message is None or user is None:
-        logger.warning("/removeadmin invoked without message or user: %s", update)
+        logger.warning(f"/removeadmin invoked without message or user: {update}")
         return ConversationHandler.END
 
     if not is_super_admin(context, user.id):
@@ -481,7 +483,7 @@ async def receive_remove_admin_id(
     message = update.message
     user = update.effective_user
     if message is None or user is None:
-        logger.warning("Remove admin invoked without message or user: %s", update)
+        logger.warning(f"Remove admin invoked without message or user: {update}")
         return ConversationHandler.END
 
     text = (message.text or "").strip()
@@ -518,7 +520,9 @@ async def receive_remove_admin_id(
         )
     else:
         await message.reply_text(get_message("general.storage_unavailable_support"))
-        logger.error("Failed to remove admin %s due to storage issue", target_admin_id)
+        logger.error(
+            f"Failed to remove admin {target_admin_id} due to storage issue"
+        )
     return ConversationHandler.END
 
 
@@ -537,12 +541,12 @@ async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     message = update.message
     if user is None or message is None:
-        logger.warning("/broadcast invoked without message or user: %s", update)
+        logger.warning(f"/broadcast invoked without message or user: {update}")
         return ConversationHandler.END
 
     if not is_admin(context, user.id):
         await message.reply_text(get_message("admin.not_authorized"))
-        logger.info("User %s tried to start broadcast without rights", user.id)
+        logger.info(f"User {user.id} tried to start broadcast without rights")
         return ConversationHandler.END
 
     context.user_data[BROADCAST_DATA_KEY] = {"sender_id": user.id}
@@ -578,7 +582,7 @@ async def choose_broadcast_audience(
     query = update.callback_query
     data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
-        logger.warning("Broadcast audience selection missing context: %s", update)
+        logger.warning(f"Broadcast audience selection missing context: {update}")
         return ConversationHandler.END
 
     await query.answer()
@@ -620,7 +624,7 @@ async def receive_broadcast_message(
     message = update.message
     data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if message is None or data is None:
-        logger.warning("Broadcast message reception missing context: %s", update)
+        logger.warning(f"Broadcast message reception missing context: {update}")
         return ConversationHandler.END
 
     text = (message.text or "").strip()
@@ -682,7 +686,7 @@ async def handle_broadcast_decision(
     query = update.callback_query
     data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
-        logger.warning("Broadcast decision missing context: %s", update)
+        logger.warning(f"Broadcast decision missing context: {update}")
         return ConversationHandler.END
 
     await query.answer()
@@ -720,7 +724,7 @@ async def receive_broadcast_schedule(
     message = update.message
     data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if message is None or data is None:
-        logger.warning("Broadcast schedule input missing context: %s", update)
+        logger.warning(f"Broadcast schedule input missing context: {update}")
         return ConversationHandler.END
 
     text = (message.text or "").strip()
@@ -807,7 +811,7 @@ async def confirm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     data: dict[str, Any] | None = context.user_data.get(BROADCAST_DATA_KEY)
     if query is None or data is None:
-        logger.warning("Broadcast confirmation missing context: %s", update)
+        logger.warning(f"Broadcast confirmation missing context: {update}")
         return ConversationHandler.END
 
     await query.answer()
@@ -887,7 +891,7 @@ async def show_scheduled_broadcasts(
     user = update.effective_user
     message = update.message
     if user is None or message is None:
-        logger.warning("/scheduled invoked without message or user: %s", update)
+        logger.warning(f"/scheduled invoked without message or user: {update}")
         return
 
     if not is_admin(context, user.id):
@@ -936,12 +940,12 @@ async def show_broadcast_history(
     user = update.effective_user
     message = update.message
     if user is None or message is None:
-        logger.warning("/broadcast_history invoked without message or user: %s", update)
+        logger.warning(f"/broadcast_history invoked without message or user: {update}")
         return
 
     if not is_admin(context, user.id):
         await message.reply_text(get_message("admin.not_authorized"))
-        logger.info("User %s tried to access broadcast history without rights", user.id)
+        logger.info(f"User {user.id} tried to access broadcast history without rights")
         return
 
     records = list_broadcast_records(context)
@@ -1006,7 +1010,7 @@ async def show_admin_roster(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user = update.effective_user
     message = update.message
     if user is None or message is None:
-        logger.warning("/admins invoked without message or user: %s", update)
+        logger.warning(f"/admins invoked without message or user: {update}")
         return
 
     if not is_super_admin(context, user.id):
@@ -1053,12 +1057,12 @@ async def execute_broadcast_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     broadcast_id = job.data.get("broadcast_id") if isinstance(job.data, dict) else None
     if not broadcast_id:
-        logger.error("Broadcast job missing broadcast_id in data: %s", job.data)
+        logger.error(f"Broadcast job missing broadcast_id in data: {job.data}")
         return
 
     record = load_broadcast_record(context, broadcast_id)
     if not record:
-        logger.error("Broadcast record %s missing; skipping job", broadcast_id)
+        logger.error(f"Broadcast record {broadcast_id} missing; skipping job")
         return
 
     audience = record.get("audience", BROADCAST_AUDIENCE_ALL)

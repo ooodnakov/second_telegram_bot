@@ -245,7 +245,7 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
     client = _get_client(context)
     if client is None:
         logger.warning(
-            "Valkey client missing while revoking application %s", session_key
+            f"Valkey client missing while revoking application {session_key}"
         )
         return False
 
@@ -253,26 +253,23 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
     key = f"{prefix}:{session_key}"
     record = load_application(client, key)
     if not record:
-        logger.warning("Application %s not found for revocation", key)
+        logger.warning(f"Application {key} not found for revocation")
         return False
 
     owner = record.get("user_id")
     if owner != str(user_id):
         logger.warning(
-            "User %s attempted to revoke application %s owned by %s",
-            user_id,
-            key,
-            owner,
+            f"User {user_id} attempted to revoke application {key} owned by {owner}"
         )
         return False
 
     if record.get("revoked_at"):
-        logger.info("Application %s is already revoked", key)
+        logger.info(f"Application {key} is already revoked")
         return False
 
     timestamp = datetime.now(UTC).isoformat()
     if not timestamp:
-        logger.error("Failed to generate revocation timestamp for %s", key)
+        logger.error(f"Failed to generate revocation timestamp for {key}")
         return False
 
     try:
@@ -281,10 +278,10 @@ def mark_application_revoked(context: Any, session_key: str, user_id: int) -> bo
             mapping={"revoked_at": timestamp, "revoked_by": str(user_id)},
         )
     except ValkeyError:
-        logger.exception("Failed to mark application %s as revoked", key)
+        logger.exception(f"Failed to mark application {key} as revoked")
         return False
 
-    logger.info("Application %s revoked by user %s", key, user_id)
+    logger.info(f"Application {key} revoked by user {user_id}")
     return True
 
 
@@ -292,7 +289,7 @@ def mark_application_deleted(context: Any, session_key: str, user_id: int) -> bo
     client = _get_client(context)
     if client is None:
         logger.warning(
-            "Valkey client missing while deleting application %s", session_key
+            f"Valkey client missing while deleting application {session_key}"
         )
         return False
 
@@ -300,26 +297,23 @@ def mark_application_deleted(context: Any, session_key: str, user_id: int) -> bo
     key = f"{prefix}:{session_key}"
     record = load_application(client, key)
     if not record:
-        logger.warning("Application %s not found for deletion", key)
+        logger.warning(f"Application {key} not found for deletion")
         return False
 
     owner = record.get("user_id")
     if owner != str(user_id):
         logger.warning(
-            "User %s attempted to delete application %s owned by %s",
-            user_id,
-            key,
-            owner,
+            f"User {user_id} attempted to delete application {key} owned by {owner}"
         )
         return False
 
     if record.get("deleted_at"):
-        logger.info("Application %s is already deleted", key)
+        logger.info(f"Application {key} is already deleted")
         return False
 
     timestamp = datetime.now(UTC).isoformat()
     if not timestamp:
-        logger.error("Failed to generate deletion timestamp for %s", key)
+        logger.error(f"Failed to generate deletion timestamp for {key}")
         return False
 
     try:
@@ -328,10 +322,10 @@ def mark_application_deleted(context: Any, session_key: str, user_id: int) -> bo
             mapping={"deleted_at": timestamp, "deleted_by": str(user_id)},
         )
     except ValkeyError:
-        logger.exception("Failed to mark application %s as deleted", key)
+        logger.exception(f"Failed to mark application {key} as deleted")
         return False
 
-    logger.info("Application %s deleted by user %s", key, user_id)
+    logger.info(f"Application {key} deleted by user {user_id}")
     return True
 
 
@@ -342,15 +336,15 @@ def update_application_fields(
 
     if not fields:
         logger.debug(
-            "No fields provided for application %s update; treating as success",
-            session_key,
+            f"No fields provided for application {session_key} update; treating as "
+            "success"
         )
         return True
 
     client = _get_client(context)
     if client is None:
         logger.warning(
-            "Valkey client missing while updating application %s", session_key
+            f"Valkey client missing while updating application {session_key}"
         )
         return False
 
@@ -358,16 +352,13 @@ def update_application_fields(
     key = f"{prefix}:{session_key}"
     record = load_application(client, key)
     if not record:
-        logger.warning("Application %s not found for update", key)
+        logger.warning(f"Application {key} not found for update")
         return False
 
     owner = record.get("user_id")
     if owner != str(user_id):
         logger.warning(
-            "User %s attempted to update application %s owned by %s",
-            user_id,
-            key,
-            owner,
+            f"User {user_id} attempted to update application {key} owned by {owner}"
         )
         return False
 
@@ -383,14 +374,12 @@ def update_application_fields(
     try:
         client.hset(key, mapping=serialized)  # type: ignore[attr-defined]
     except ValkeyError:
-        logger.exception("Failed to update application %s", key)
+        logger.exception(f"Failed to update application {key}")
         return False
 
     logger.info(
-        "Application %s updated by user %s with fields %s",
-        key,
-        user_id,
-        sorted(serialized.keys()),
+        f"Application {key} updated by user {user_id} with fields "
+        f"{sorted(serialized.keys())}"
     )
     return True
 
@@ -413,8 +402,7 @@ def mark_application_reviewed(
     client = _get_client(context)
     if client is None:
         logger.warning(
-            "Valkey client missing while marking application %s reviewed",
-            session_key,
+            f"Valkey client missing while marking application {session_key} reviewed"
         )
         return None
 
@@ -422,7 +410,7 @@ def mark_application_reviewed(
     key = f"{prefix}:{session_key}"
     record = load_application(client, key)
     if not record:
-        logger.warning("Application %s not found for review", key)
+        logger.warning(f"Application {key} not found for review")
         return None
 
     timestamp = datetime.now(UTC).isoformat()
@@ -433,10 +421,10 @@ def mark_application_reviewed(
             mapping={"reviewed_at": timestamp, "reviewed_by": str(reviewer_id)},
         )
     except ValkeyError:
-        logger.exception("Failed to mark application %s as reviewed", key)
+        logger.exception(f"Failed to mark application {key} as reviewed")
         return None
 
-    logger.info("Application %s marked reviewed by admin %s", key, reviewer_id)
+    logger.info(f"Application {key} marked reviewed by admin {reviewer_id}")
     return timestamp
 
 
@@ -446,8 +434,7 @@ def clear_application_review(context: Any, session_key: str) -> bool:
     client = _get_client(context)
     if client is None:
         logger.warning(
-            "Valkey client missing while clearing review flag for %s",
-            session_key,
+            f"Valkey client missing while clearing review flag for {session_key}"
         )
         return False
 
@@ -455,7 +442,7 @@ def clear_application_review(context: Any, session_key: str) -> bool:
     key = f"{prefix}:{session_key}"
     record = load_application(client, key)
     if not record:
-        logger.warning("Application %s not found while clearing review", key)
+        logger.warning(f"Application {key} not found while clearing review")
         return False
 
     try:
@@ -465,10 +452,10 @@ def clear_application_review(context: Any, session_key: str) -> bool:
             "reviewed_by",
         )
     except ValkeyError:
-        logger.exception("Failed to clear review flag for application %s", key)
+        logger.exception(f"Failed to clear review flag for application {key}")
         return False
 
-    logger.info("Cleared review flag for application %s", key)
+    logger.info(f"Cleared review flag for application {key}")
     return True
 
 

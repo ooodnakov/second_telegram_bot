@@ -80,7 +80,7 @@ class MediaStorage(ABC):
             if not normalized or normalized in seen:
                 continue
             if ".." in Path(normalized).parts:
-                logger.warning("Skipping suspicious photo handle %s", normalized)
+                logger.warning(f"Skipping suspicious photo handle {normalized}")
                 continue
             seen.add(normalized)
             try:
