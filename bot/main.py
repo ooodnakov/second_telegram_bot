@@ -29,6 +29,8 @@ from bot.commands import (
     handle_revoke_callback,
     help_command,
     list_applications,
+    navigate_list_photo_next,
+    navigate_list_photo_prev,
     new,
     paginate_list,
     revoke_application,
@@ -161,6 +163,12 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:page:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_delete_callback, pattern=r"^delete:"))
     app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
+    app.add_handler(
+        CallbackQueryHandler(navigate_list_photo_prev, pattern=r"^list_photo:prev:")
+    )
+    app.add_handler(
+        CallbackQueryHandler(navigate_list_photo_next, pattern=r"^list_photo:next:")
+    )
     app.add_handler(
         CallbackQueryHandler(
             navigate_application_photo_prev, pattern=r"^admin_app_photo_prev:"

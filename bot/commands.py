@@ -1372,6 +1372,8 @@ __all__ = [
     "delete_application",
     "handle_delete_callback",
     "list_applications",
+    "navigate_list_photo_next",
+    "navigate_list_photo_prev",
     "new",
     "paginate_list",
     "refresh_application_detail",
