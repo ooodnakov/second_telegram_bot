@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
@@ -68,7 +69,28 @@ def setup_logger() -> "LoguruLogger":
 
     """
     logger.remove()
-    logger.add(sys.stderr, format=custom_format, colorize=True)  # type: ignore[arg-type]
+    logger.configure(patcher=_patch_record)
+    logger.add(  # type: ignore[arg-type]
+        sys.stderr,
+        format=custom_format,
+        colorize=True,
+        diagnose=False,
+    )
     logger.add(PropagateHandler(), format="{message}")
 
     return logger
+
+
+_TOKEN_RE = re.compile(r"\b(bot)?(\d{6,}):([A-Za-z0-9_-]{10,})\b")
+
+
+def _redact_secrets(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        prefix = "bot" if match.group(1) else ""
+        return f"{prefix}{match.group(2)}:***"
+
+    return _TOKEN_RE.sub(_replace, text)
+
+
+def _patch_record(record: dict[str, Any]) -> None:
+    record["message"] = _redact_secrets(str(record.get("message", "")))
