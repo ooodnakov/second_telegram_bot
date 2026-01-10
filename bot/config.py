@@ -51,6 +51,8 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
         logger.error("Telegram bot token is missing in the config file {}", config_path)
         raise RuntimeError("Telegram bot token is missing in the config file.")
 
+    proxy_url = parser.get(CONFIG_SECTION, "proxy_url", fallback="").strip() or None
+
     moderators: list[int] = []
     raw_moderators = parser.get(
         CONFIG_SECTION, "moderator_chat_ids", fallback=""
@@ -126,6 +128,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
 
     return {
         "token": token,
+        "proxy_url": proxy_url,
         "moderator_chat_ids": moderators,
         "super_admin_ids": super_admins,
         "valkey": {

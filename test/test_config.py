@@ -12,6 +12,7 @@ def test_load_config_logs_and_parses(tmp_path: Path, bot_modules) -> None:
 [telegram]
 token = 123456:ABC
 moderator_chat_ids = 123,456
+proxy_url = http://proxy.local:8888
 
 [valkey]
 valkey_host = localhost
@@ -25,6 +26,7 @@ valkey_prefix = demo_prefix
         config = bot_modules.config.load_config(config_path)
 
     assert config["token"] == "123456:ABC"
+    assert config["proxy_url"] == "http://proxy.local:8888"
     assert config["moderator_chat_ids"] == [123, 456]
     assert config["valkey"]["host"] == "localhost"
     assert config["valkey"]["port"] == 6379

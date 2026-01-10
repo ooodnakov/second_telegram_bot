@@ -90,6 +90,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 
 def main() -> None:
@@ -101,7 +102,12 @@ def main() -> None:
     except RuntimeError as exc:
         raise SystemExit(f"Failed to load configuration: {exc}") from exc
 
-    app = ApplicationBuilder().token(config["token"]).build()
+    builder = ApplicationBuilder().token(config["token"])
+    proxy_url = config.get("proxy_url")
+    if proxy_url:
+        builder = builder.request(HTTPXRequest(proxy_url=proxy_url))
+        logger.info("Telegram proxy configured")
+    app = builder.build()
     logger.debug("Application builder created")
 
     valkey_client = create_valkey_client(config)
