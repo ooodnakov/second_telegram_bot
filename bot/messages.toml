@@ -15,7 +15,7 @@ greeting = "Привет! Добро пожаловать."
 new_instruction = "Чтобы отправить новую заявку, используйте команду /new."
 
 [help]
-text = "Доступные команды:\n`/start` — приветствие и краткая инструкция.\n`/new` — отправить новую заявку.\n`/list` — показать отправленные заявки.\n`/cancel` — отменить текущую заявку."
+text = "Доступные команды:\n`/start` — приветствие и краткая инструкция.\n`/new` — отправить новую заявку.\n`/list` — показать отправленные заявки.\n`/delete` — удалить отправленную заявку.\n`/cancel` — отменить текущую заявку."
 admin_header = "*Команды администратора:*"
 admin_view = "`/applications` — просмотреть все заявки."
 admin_broadcast = "`/broadcast` — отправить сообщение пользователям."
@@ -51,6 +51,7 @@ edit_position_button = "Изменить название"
 edit_condition_button = "Изменить состояние"
 edit_description_button = "Изменить описание"
 edit_photos_button = "Обновить фото"
+delete_button = "Удалить заявку"
 back_to_list_button = "← Вернуться к списку"
 
 [revoke]
@@ -62,6 +63,18 @@ already_revoked = "Эта заявка уже была отозвана."
 cancelled = "Отзыв отменён."
 button_cancel = "Отмена"
 button_confirm = "Да, отозвать"
+button_decline = "Нет"
+list_entry = "{index}. {position} — отправлено {created_at}"
+
+[delete]
+prompt = "Выберите заявку, которую хотите удалить:"
+no_active = "Нет заявок, которые можно удалить."
+confirm = "Удалить заявку «{position}», отправленную {created_at}?"
+success = "Заявка удалена."
+already_deleted = "Эта заявка уже удалена."
+cancelled = "Удаление отменено."
+button_cancel = "Отмена"
+button_confirm = "Да, удалить"
 button_decline = "Нет"
 list_entry = "{index}. {position} — отправлено {created_at}"
 
