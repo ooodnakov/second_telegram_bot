@@ -23,7 +23,9 @@ from bot.admin_commands import (
     view_all_applications,
 )
 from bot.commands import (
+    delete_application,
     error_handler,
+    handle_delete_callback,
     handle_revoke_callback,
     help_command,
     list_applications,
@@ -146,6 +148,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("delete", delete_application))
     app.add_handler(CommandHandler("list", list_applications))
     app.add_handler(CommandHandler("revoke", revoke_application))
     app.add_handler(CommandHandler("applications", view_all_applications))
@@ -156,6 +159,7 @@ def main() -> None:
         CallbackQueryHandler(show_application_detail, pattern=r"^list:view:")
     )
     app.add_handler(CallbackQueryHandler(paginate_list, pattern=r"^list:page:\d+:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_delete_callback, pattern=r"^delete:"))
     app.add_handler(CallbackQueryHandler(handle_revoke_callback, pattern=r"^revoke:"))
     app.add_handler(
         CallbackQueryHandler(
