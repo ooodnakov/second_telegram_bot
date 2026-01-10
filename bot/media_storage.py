@@ -264,11 +264,19 @@ class MinioMediaStorage(MediaStorage):
     def cache_photo(self, handle: str) -> Path:
         if self._cache_dir is None:
             raise RuntimeError("Cache directory not configured for MinIO storage")
-        if Path(handle).is_absolute():
-            raise FileNotFoundError(handle)
-
         base = self._cache_dir
-        target = (base / Path(handle)).resolve(strict=False)
+        handle_path = Path(handle)
+        if handle_path.is_absolute():
+            resolved = handle_path.resolve(strict=False)
+            if resolved.exists() and resolved.is_relative_to(base):
+                return resolved
+            derived = self._handle_from_local_path(resolved)
+            if not derived:
+                raise FileNotFoundError(handle)
+            handle = derived
+            handle_path = Path(handle)
+
+        target = (base / handle_path).resolve(strict=False)
         if not target.is_relative_to(base):
             raise FileNotFoundError(handle)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +299,17 @@ class MinioMediaStorage(MediaStorage):
         if self._prefix and object_name.startswith(self._prefix):
             return object_name[len(self._prefix) :]
         return object_name
+
+    def _handle_from_local_path(self, path: Path) -> str | None:
+        if path.is_relative_to(self._cache_dir):
+            return path.relative_to(self._cache_dir).as_posix()
+        parts = path.parts
+        if len(parts) < 2:
+            return None
+        candidate = Path(parts[-2]) / parts[-1]
+        if ".." in candidate.parts:
+            return None
+        return candidate.as_posix()
 
 
 def create_media_storage(settings: dict[str, object] | None) -> MediaStorage:
