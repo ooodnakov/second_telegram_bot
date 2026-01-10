@@ -7,6 +7,8 @@ class DummyBot:
     def __init__(self, file_dir: Path) -> None:
         self.file_dir = file_dir
         self.edited_messages: list[tuple[int, int, str]] = []
+        self.edited_captions: list[tuple[int, int, str]] = []
+        self.edited_media: list[tuple[int, int, object]] = []
         self.sent_photos: list[tuple[int, Path]] = []
         self.file_requests: list[str] = []
 
@@ -15,7 +17,19 @@ class DummyBot:
     ) -> None:
         self.edited_messages.append((chat_id, message_id, text))
 
-    async def send_photo(self, chat_id: int, photo) -> None:  # pragma: no cover - IO
+    async def edit_message_caption(
+        self, chat_id: int, message_id: int, caption: str, reply_markup=None
+    ) -> None:
+        self.edited_captions.append((chat_id, message_id, caption))
+
+    async def edit_message_media(
+        self, chat_id: int, message_id: int, media, reply_markup=None
+    ) -> None:
+        self.edited_media.append((chat_id, message_id, media))
+
+    async def send_photo(
+        self, chat_id: int, photo, caption: str | None = None, reply_markup=None
+    ) -> None:  # pragma: no cover - IO
         path = Path(getattr(photo, "name", "photo"))
         self.sent_photos.append((chat_id, path))
 
@@ -40,10 +54,13 @@ class DummyBot:
 
 
 class DummyMessage:
-    def __init__(self, chat_id: int, message_id: int = 1) -> None:
+    def __init__(
+        self, chat_id: int, message_id: int = 1, *, has_photo: bool = False
+    ) -> None:
         self.chat_id = chat_id
         self.message_id = message_id
         self.chat = SimpleNamespace(id=chat_id)
+        self.photo = [object()] if has_photo else []
         self.replies: list[tuple[str, object | None]] = []
 
     async def reply_text(self, text: str, reply_markup=None) -> None:
@@ -63,6 +80,9 @@ class DummyCallbackQuery:
 
     async def edit_message_text(self, text: str, reply_markup=None) -> None:
         self.edits.append((text, reply_markup))
+
+    async def edit_message_caption(self, caption: str, reply_markup=None) -> None:
+        self.edits.append((caption, reply_markup))
 
 
 class DummyUserMessage:
@@ -146,6 +166,8 @@ def test_list_applications_renders_grid(tmp_path, bot_modules):
         storage = _make_local_storage(bot_modules, tmp_path)
         client, context = _build_context(bot_modules, bot, storage)
 
+        (tmp_path / "media").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "media" / "applications.png").write_bytes(b"cover")
         _create_submission(client, "testbot", "s1", 100, storage)
 
         message = DummyMessage(chat_id=100)
@@ -157,12 +179,10 @@ def test_list_applications_renders_grid(tmp_path, bot_modules):
         result = await commands.list_applications(update, context)
         assert result is commands.ConversationHandler.END
 
-        assert message.replies
-        text_value, markup = message.replies[0]
-        assert text_value == commands.get_message("list.instructions")
-        assert markup is not None
-        assert markup.inline_keyboard
-        assert markup.inline_keyboard[0][0].callback_data.startswith("list:view:")
+        assert not message.replies
+        assert bot.sent_photos
+        _chat_id, path = bot.sent_photos[0]
+        assert path.name == "applications.png"
 
     asyncio.run(run())
 
@@ -200,6 +220,8 @@ def test_list_applications_renders_grid_minio(tmp_path, bot_modules):
         _minio_client, storage = _make_minio_storage(bot_modules, tmp_path)
         client, context = _build_context(bot_modules, bot, storage)
 
+        (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "cache" / "applications.png").write_bytes(b"cover")
         _create_submission(client, "testbot", "s1", 100, storage)
 
         message = DummyMessage(chat_id=100)
@@ -211,12 +233,10 @@ def test_list_applications_renders_grid_minio(tmp_path, bot_modules):
         result = await commands.list_applications(update, context)
         assert result is commands.ConversationHandler.END
 
-        assert message.replies
-        text_value, markup = message.replies[0]
-        assert text_value == commands.get_message("list.instructions")
-        assert markup is not None
-        assert markup.inline_keyboard
-        assert markup.inline_keyboard[0][0].callback_data.startswith("list:view:")
+        assert not message.replies
+        assert bot.sent_photos
+        _chat_id, path = bot.sent_photos[0]
+        assert path.name == "applications.png"
         assert (tmp_path / "cache" / "s1" / "photo.jpg").exists()
 
     asyncio.run(run())
@@ -229,6 +249,8 @@ def test_paginate_list_updates_message(tmp_path, bot_modules):
         storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
         client, context = _build_context(bot_modules, bot, storage)
 
+        (tmp_path / "media").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "media" / "applications.png").write_bytes(b"cover")
         for idx in range(2):
             session = f"s{idx + 1}"
             _create_submission(
@@ -246,7 +268,7 @@ def test_paginate_list_updates_message(tmp_path, bot_modules):
             context,
         )
 
-        callback_message = DummyMessage(chat_id=100, message_id=10)
+        callback_message = DummyMessage(chat_id=100, message_id=10, has_photo=True)
         query = DummyCallbackQuery("list:page:0:100", 100, callback_message)
         await commands.paginate_list(SimpleNamespace(callback_query=query), context)
 
@@ -265,6 +287,8 @@ def test_show_application_detail_sends_photos(tmp_path, bot_modules):
         storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
         client, context = _build_context(bot_modules, bot, storage)
 
+        (tmp_path / "media").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "media" / "applications.png").write_bytes(b"cover")
         _create_submission(client, "testbot", "session", 100, storage)
 
         list_message = DummyMessage(chat_id=100)
@@ -275,22 +299,14 @@ def test_show_application_detail_sends_photos(tmp_path, bot_modules):
             context,
         )
 
-        callback_message = DummyMessage(chat_id=100, message_id=55)
+        callback_message = DummyMessage(chat_id=100, message_id=55, has_photo=True)
         query = DummyCallbackQuery("list:view:session:0:100", 100, callback_message)
         await commands.show_application_detail(
             SimpleNamespace(callback_query=query), context
         )
 
-        assert query.edits
-        detail_text, markup = query.edits[0]
-        assert "Заявка:" in detail_text
-        assert markup is not None
-        assert any(
-            button.callback_data.startswith("edit:")
-            for row in markup.inline_keyboard
-            for button in row
-        )
-        assert bot.sent_photos
+        assert bot.edited_media
+        assert "Заявка:" in bot.edited_media[0][2].caption
 
     asyncio.run(run())
 
@@ -301,6 +317,8 @@ async def _prepare_detail_view(tmp_path, bot_modules):
     storage = bot_modules.media_storage.LocalMediaStorage(tmp_path / "media")
     client, context = _build_context(bot_modules, bot, storage)
 
+    (tmp_path / "media").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "media" / "applications.png").write_bytes(b"cover")
     _create_submission(client, "testbot", "session", 100, storage)
 
     await commands.list_applications(
@@ -311,7 +329,7 @@ async def _prepare_detail_view(tmp_path, bot_modules):
         context,
     )
     detail_query = DummyCallbackQuery(
-        "list:view:session:0:100", 100, DummyMessage(100, 5)
+        "list:view:session:0:100", 100, DummyMessage(100, 5, has_photo=True)
     )
     await commands.show_application_detail(
         SimpleNamespace(callback_query=detail_query), context
@@ -351,7 +369,7 @@ def test_edit_position_updates_record(tmp_path, bot_modules):
 
         record = client.hgetall("testbot:session")
         assert record["position"] == "Новая позиция"
-        assert bot.edited_messages
+        assert bot.edited_messages or bot.edited_media
 
     asyncio.run(run())
 
@@ -387,7 +405,7 @@ def test_edit_description_updates_record(tmp_path, bot_modules):
 
         record = client.hgetall("testbot:session")
         assert record["description"] == "Новое описание"
-        assert bot.edited_messages
+        assert bot.edited_messages or bot.edited_media
 
     asyncio.run(run())
 
@@ -424,7 +442,7 @@ def test_edit_condition_updates_record(tmp_path, bot_modules):
 
         record = client.hgetall("testbot:session")
         assert record["condition"] == commands.get_message("workflow.condition_new")
-        assert bot.edited_messages
+        assert bot.edited_messages or bot.edited_media
 
     asyncio.run(run())
 
@@ -497,7 +515,7 @@ def test_edit_photos_replaces_media(tmp_path, bot_modules):
 
         record = client.hgetall("testbot:session")
         assert "update_01" in record["photos"]
-        assert bot.edited_messages
+        assert bot.edited_messages or bot.edited_media
         assert bot.sent_photos
 
     asyncio.run(run())
