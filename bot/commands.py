@@ -30,6 +30,10 @@ REVOKE_CACHE_KEY = "revoke_submissions"
 DELETE_CACHE_KEY = "delete_submissions"
 LIST_STATE_KEY = "list_state"
 
+_PLACEHOLDER_PHOTO = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg=="
+)
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display a greeting message when the user invokes /start."""
@@ -229,6 +233,26 @@ def _extract_photo_paths(submission: dict[str, str]) -> list[str]:
     return handles
 
 
+def _cached_photo_paths(
+    context: ContextTypes.DEFAULT_TYPE, handles: list[str]
+) -> list[Path]:
+    storage = get_media_storage(context)
+    cached_paths = storage.cache_photos(handles)
+    return [path for path in cached_paths if path.exists()]
+
+
+def _list_cover_path(context: ContextTypes.DEFAULT_TYPE) -> Path | None:
+    local_path = MEDIA_ROOT / "applications.png"
+    if local_path.exists():
+        return local_path
+    storage = get_media_storage(context)
+    try:
+        path = storage.cache_photo("applications.png")
+    except FileNotFoundError:
+        return None
+    return path if path.exists() else None
+
+
 def _format_detail_status(submission: dict[str, str]) -> str:
     revoked_at = submission.get("revoked_at", "")
     if revoked_at:
@@ -271,8 +295,26 @@ def _format_detail_text(submission: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _available_photo_paths(
+    context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
+) -> list[Path]:
+    handles = _extract_photo_paths(submission)
+    return _cached_photo_paths(context, handles)
+
+
+def _open_photo_stream(photo_paths: list[Path], photo_index: int):
+    if photo_paths:
+        stream = photo_paths[photo_index].open("rb")
+        stream.seek(0)
+        return stream
+    placeholder = BytesIO(_PLACEHOLDER_PHOTO)
+    placeholder.name = "placeholder.png"  # type: ignore[attr-defined]
+    placeholder.seek(0)
+    return placeholder
+
+
 def _build_detail_keyboard(
-    session_key: str, page: int, user_id: int
+    session_key: str, page: int, user_id: int, photo_total: int = 0
 ) -> InlineKeyboardMarkup:
     buttons = [
         [
