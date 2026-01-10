@@ -10,6 +10,7 @@ from bot.admin import (
     fetch_user_submissions,
     is_admin,
     is_super_admin,
+    mark_application_deleted,
     mark_application_revoked,
     record_active_user,
 )
@@ -24,6 +25,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 REVOKE_CACHE_KEY = "revoke_submissions"
+DELETE_CACHE_KEY = "delete_submissions"
 LIST_STATE_KEY = "list_state"
 
 
@@ -290,6 +292,12 @@ def _build_detail_keyboard(
                 get_message("list.edit_photos_button"),
                 callback_data=f"edit:photos:{session_key}",
             ),
+        ],
+        [
+            InlineKeyboardButton(
+                get_message("list.delete_button"),
+                callback_data=f"delete:select:{session_key}",
+            )
         ],
         [
             InlineKeyboardButton(
@@ -742,6 +750,32 @@ def _get_revoke_cache(
     return rebuilt or {}
 
 
+def _build_delete_cache(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, dict[str, str]] | None:
+    submissions = fetch_user_submissions(context, user_id)
+    if submissions is None:
+        return None
+    cache: dict[str, dict[str, str]] = {}
+    for submission in submissions:
+        session_key = submission.get("session_key")
+        if not session_key:
+            continue
+        cache[session_key] = submission
+    context.user_data[DELETE_CACHE_KEY] = cache  # type: ignore[index]
+    return cache
+
+
+def _get_delete_cache(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict[str, dict[str, str]]:
+    cache = context.user_data.get(DELETE_CACHE_KEY)  # type: ignore[index]
+    if isinstance(cache, dict):
+        return cache
+    rebuilt = _build_delete_cache(context, user_id)
+    return rebuilt or {}
+
+
 async def revoke_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     message = update.message
@@ -903,9 +937,185 @@ async def handle_revoke_callback(
         return
 
 
+async def delete_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    message = update.message
+    if user is None or message is None:
+        logger.warning("Received /delete update without message or user: {}", update)
+        return ConversationHandler.END
+
+    cache = _build_delete_cache(context, user.id)
+    if cache is None:
+        await message.reply_text(get_message("general.storage_unavailable"))
+        logger.error("Valkey unavailable when user %s attempted deletion", user.id)
+        return ConversationHandler.END
+
+    active_items = [
+        submission for submission in cache.values() if not submission.get("deleted_at")
+    ]
+    if not active_items:
+        await message.reply_text(get_message("delete.no_active"))
+        logger.info("User %s has no submissions to delete", user.id)
+        return ConversationHandler.END
+
+    lines = [get_message("delete.prompt")]
+    keyboard: list[list[InlineKeyboardButton]] = []
+    for index, submission in enumerate(active_items, start=1):
+        position = submission.get("position", get_message("general.placeholder"))
+        created_at = _format_created_at(submission.get("created_at", ""))
+        lines.append(
+            get_message(
+                "delete.list_entry",
+                index=index,
+                position=position,
+                created_at=created_at,
+            )
+        )
+        session_key = submission.get("session_key", "")
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"{index}. {position}",
+                    callback_data=f"delete:select:{session_key}",
+                )
+            ]
+        )
+
+    keyboard.append(
+        [
+            InlineKeyboardButton(
+                get_message("delete.button_cancel"), callback_data="delete:cancel"
+            )
+        ]
+    )
+
+    text = "\n".join(lines)
+    await message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    logger.debug("Presented deletion options to user %s", user.id)
+    return ConversationHandler.END
+
+
+async def handle_delete_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    if query is None:
+        logger.warning("Received delete callback without query: {}", update)
+        return
+
+    data = (query.data or "").split(":")
+    if not data or data[0] != "delete":
+        return
+
+    await query.answer()
+
+    user = query.from_user
+    if user is None:
+        logger.warning("Delete callback missing user: %s", update)
+        return
+
+    if len(data) >= 2 and data[1] == "cancel":
+        await query.edit_message_text(get_message("delete.cancelled"))
+        context.user_data.pop(DELETE_CACHE_KEY, None)  # type: ignore[index]
+        logger.debug("User %s cancelled deletion", user.id)
+        return
+
+    if len(data) >= 3 and data[1] == "select":
+        session_key = data[2]
+        cache = _get_delete_cache(context, user.id)
+        submission = cache.get(session_key)
+        if not submission:
+            cache = _build_delete_cache(context, user.id) or {}
+            submission = cache.get(session_key)
+        if submission is None:
+            await query.edit_message_text(get_message("general.no_submissions"))
+            logger.warning(
+                "User %s attempted to delete missing submission %s",
+                user.id,
+                session_key,
+            )
+            return
+        if submission.get("deleted_at"):
+            await query.edit_message_text(get_message("delete.already_deleted"))
+            return
+        text = get_message(
+            "delete.confirm",
+            position=submission.get("position", get_message("general.placeholder")),
+            created_at=_format_created_at(submission.get("created_at", "")),
+        )
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        get_message("delete.button_confirm"),
+                        callback_data=f"delete:confirm:{session_key}",
+                    ),
+                    InlineKeyboardButton(
+                        get_message("delete.button_decline"),
+                        callback_data="delete:cancel",
+                    ),
+                ]
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=keyboard)
+        logger.debug(
+            "User %s prompted to confirm deletion of submission %s",
+            user.id,
+            session_key,
+        )
+        return
+
+    if len(data) >= 3 and data[1] == "confirm":
+        session_key = data[2]
+        cache = _get_delete_cache(context, user.id)
+        submission = cache.get(session_key)
+        if not submission:
+            cache = _build_delete_cache(context, user.id) or {}
+            submission = cache.get(session_key)
+        if submission and submission.get("deleted_at"):
+            await query.edit_message_text(get_message("delete.already_deleted"))
+            return
+
+        success = mark_application_deleted(context, session_key, user.id)
+        if not success:
+            await query.edit_message_text(
+                get_message("general.storage_unavailable_support")
+            )
+            return
+
+        context.user_data.pop(DELETE_CACHE_KEY, None)  # type: ignore[index]
+        refreshed = fetch_user_submissions(context, user.id)
+        if refreshed is None:
+            context.user_data.pop(LIST_STATE_KEY, None)  # type: ignore[index]
+        else:
+            state = _get_or_create_list_state(context)
+            _set_list_state_submissions(state, refreshed)
+            state["user_id"] = user.id
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        get_message("list.back_to_list_button"),
+                        callback_data=f"list:page:0:{user.id}",
+                    )
+                ]
+            ]
+        )
+        await query.edit_message_text(
+            get_message("delete.success"), reply_markup=keyboard
+        )
+        logger.info("User %s deleted submission %s", user.id, session_key)
+        return
+
+
 __all__ = [
     "error_handler",
     "help_command",
+    "delete_application",
+    "handle_delete_callback",
     "list_applications",
     "new",
     "paginate_list",
