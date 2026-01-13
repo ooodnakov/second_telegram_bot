@@ -147,6 +147,7 @@ def main() -> None:
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
+        allow_reentry=True,
     )
 
     app.add_handler(CommandHandler("start", start))
