@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import enum
 import importlib
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 from pytest import MonkeyPatch
@@ -17,104 +17,68 @@ def stub_external_modules() -> Iterator[None]:
     monkeypatch = MonkeyPatch()
 
     if "telegram" not in sys.modules:
-        telegram_module = types.ModuleType("telegram")
-        telegram_module.Bot = type("Bot", (), {})
-        telegram_module.Update = type("Update", (), {})
+        try:
+            importlib.import_module("telegram")
+        except ModuleNotFoundError:
+            telegram_module = types.ModuleType("telegram")
+            telegram_module.Bot = MagicMock(name="Bot")
+            telegram_module.Update = MagicMock(name="Update")
+            telegram_module.InlineKeyboardButton = MagicMock(
+                name="InlineKeyboardButton"
+            )
+            telegram_module.InlineKeyboardMarkup = MagicMock(
+                name="InlineKeyboardMarkup"
+            )
+            telegram_module.InputMediaPhoto = MagicMock(name="InputMediaPhoto")
+            monkeypatch.setitem(sys.modules, "telegram", telegram_module)
 
-        class _InlineKeyboardButton:
-            def __init__(
-                self, text: str | None = None, callback_data: str | None = None
-            ):
-                self.text = text
-                self.callback_data = callback_data
+            telegram_error_module = types.ModuleType("telegram.error")
+            telegram_error_module.BadRequest = ValueError
+            telegram_error_module.TelegramError = RuntimeError
+            monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
 
-        class _InlineKeyboardMarkup:
-            def __init__(self, inline_keyboard: list[list[object]] | None = None):
-                self.inline_keyboard = inline_keyboard or []
-
-        class _InputMediaPhoto:
-            def __init__(
-                self,
-                media: object | None = None,
-                *,
-                caption: str | None = None,
-                parse_mode: str | None = None,
-                **kwargs,
-            ):
-                self.media = media
-                self.caption = caption
-                self.parse_mode = parse_mode
-                self.extra = kwargs
-
-        telegram_module.InlineKeyboardButton = _InlineKeyboardButton
-        telegram_module.InlineKeyboardMarkup = _InlineKeyboardMarkup
-        telegram_module.InputMediaPhoto = _InputMediaPhoto
-        monkeypatch.setitem(sys.modules, "telegram", telegram_module)
-
-        telegram_error_module = types.ModuleType("telegram.error")
-        telegram_error_module.BadRequest = type("BadRequest", (Exception,), {})
-        telegram_error_module.TelegramError = type("TelegramError", (Exception,), {})
-        monkeypatch.setitem(sys.modules, "telegram.error", telegram_error_module)
-
-        telegram_constants_module = types.ModuleType("telegram.constants")
-        telegram_constants_module.ChatType = enum.Enum(
-            "ChatType", {"PRIVATE": "private", "GROUP": "group"}
-        )
-        monkeypatch.setitem(
-            sys.modules, "telegram.constants", telegram_constants_module
-        )
+            telegram_constants_module = types.ModuleType("telegram.constants")
+            telegram_constants_module.ChatType = SimpleNamespace(
+                PRIVATE="private", GROUP="group"
+            )
+            monkeypatch.setitem(
+                sys.modules, "telegram.constants", telegram_constants_module
+            )
 
     if "telegram.ext" not in sys.modules:
-        ext_module = types.ModuleType("telegram.ext")
+        try:
+            importlib.import_module("telegram.ext")
+        except ModuleNotFoundError:
+            ext_module = types.ModuleType("telegram.ext")
 
-        class _ApplicationBuilder:
-            def token(self, _token: str) -> "_ApplicationBuilder":
-                return self
+            app_builder = MagicMock(name="ApplicationBuilder()")
+            app_builder.token.return_value = app_builder
+            app_builder.build.return_value = SimpleNamespace(
+                bot_data={},
+                add_handler=MagicMock(name="add_handler"),
+                add_error_handler=MagicMock(name="add_error_handler"),
+                run_polling=MagicMock(name="run_polling"),
+            )
 
-            def build(self) -> SimpleNamespace:
-                return SimpleNamespace(
-                    bot_data={},
-                    add_handler=lambda *args, **kwargs: None,
-                    add_error_handler=lambda *args, **kwargs: None,
-                    run_polling=lambda: None,
-                )
+            conversation_handler = MagicMock(name="ConversationHandler")
+            conversation_handler.END = object()
 
-        class _ConversationHandler:
-            END = object()
+            filters_mock = MagicMock(name="filters")
+            filters_mock.TEXT = MagicMock(name="filters.TEXT")
+            filters_mock.COMMAND = MagicMock(name="filters.COMMAND")
+            filters_mock.PHOTO = MagicMock(name="filters.PHOTO")
+            filters_mock.Regex = MagicMock(name="filters.Regex")
 
-            def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - dummy init
-                """Placeholder initializer."""
-
-        class _DummyHandler:
-            def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - dummy init
-                """Placeholder initializer."""
-
-        class _Filters:
-            def __init__(self) -> None:
-                self.TEXT = self
-                self.COMMAND = self
-                self.PHOTO = self
-
-            def __and__(self, _other: object) -> "_Filters":
-                return self
-
-            def __or__(self, _other: object) -> "_Filters":
-                return self
-
-            def __invert__(self) -> "_Filters":
-                return self
-
-            def Regex(self, _pattern: str) -> "_Filters":
-                return self
-
-        ext_module.ApplicationBuilder = _ApplicationBuilder
-        ext_module.CommandHandler = _DummyHandler
-        ext_module.MessageHandler = _DummyHandler
-        ext_module.CallbackQueryHandler = _DummyHandler
-        ext_module.ConversationHandler = _ConversationHandler
-        ext_module.ContextTypes = SimpleNamespace(DEFAULT_TYPE=object())
-        ext_module.filters = _Filters()
-        monkeypatch.setitem(sys.modules, "telegram.ext", ext_module)
+            ext_module.ApplicationBuilder = MagicMock(
+                name="ApplicationBuilder", return_value=app_builder
+            )
+            ext_module.CommandHandler = MagicMock(name="CommandHandler")
+            ext_module.MessageHandler = MagicMock(name="MessageHandler")
+            ext_module.CallbackQueryHandler = MagicMock(name="CallbackQueryHandler")
+            ext_module.ConversationHandler = conversation_handler
+            ext_module.ContextTypes = SimpleNamespace(DEFAULT_TYPE=object())
+            ext_module.filters = filters_mock
+            monkeypatch.setitem(sys.modules, "telegram.ext", ext_module)
 
     if "valkey" not in sys.modules:
         valkey_module = types.ModuleType("valkey")
