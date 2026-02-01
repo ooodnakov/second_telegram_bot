@@ -44,7 +44,9 @@ MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     DESCRIPTION,
     PRICE,
     CONTACTS,
-) = range(8)
+    METRO,
+    DELIVERY,
+) = range(10)
 
 (
     ADMIN_ADD_ADMIN_WAIT_ID,
@@ -54,19 +56,20 @@ MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     ADMIN_BROADCAST_DECISION,
     ADMIN_BROADCAST_SCHEDULE_TIME,
     ADMIN_BROADCAST_CONFIRM,
-) = range(CONTACTS + 1, CONTACTS + 8)
+) = range(DELIVERY + 1, DELIVERY + 8)
 
 (
     EDIT_POSITION,
     EDIT_CONDITION,
     EDIT_DESCRIPTION,
     EDIT_PHOTOS,
-) = range(CONTACTS + 8, CONTACTS + 12)
+) = range(DELIVERY + 8, DELIVERY + 12)
 
 __all__ = [
     "CONTACTS",
     "CONDITION",
     "DESCRIPTION",
+    "DELIVERY",
     "EDIT_CONDITION",
     "EDIT_DESCRIPTION",
     "EDIT_PHOTOS",
@@ -81,6 +84,7 @@ __all__ = [
     "LIST_PAGE_SIZE",
     "MATERIAL",
     "MEDIA_ROOT",
+    "METRO",
     "MOSCOW_TZ",
     "PHOTOS",
     "POSITION",

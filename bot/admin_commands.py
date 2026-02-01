@@ -1405,6 +1405,8 @@ def _build_caption(
         description=html.escape(field("description")),
         price=html.escape(field("price")),
         contacts=html.escape(field("contacts")),
+        metro=html.escape(field("metro")),
+        delivery=html.escape(field("delivery")),
         photo_count=html.escape(photo_info),
     )
 

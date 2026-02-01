@@ -5,7 +5,7 @@ import types
 from pathlib import Path
 
 
-def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
+def test_get_delivery_persists_submission(tmp_path: Path, bot_modules) -> None:
     workflow = bot_modules.workflow
     storage = bot_modules.storage
     client = storage.InMemoryValkey()
@@ -28,6 +28,8 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
         "material": "Wool",
         "description": "Warm coat",
         "price": "1000",
+        "contacts": "@seller",
+        "metro": "Павелецкая",
     }
 
     store = storage.ApplicationStore(client, prefix=prefix)
@@ -59,7 +61,7 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
         first_name="Test",
         last_name="User",
     )
-    message = DummyMessage("@seller")
+    message = DummyMessage("Да, отправлю доставкой")
     chat = types.SimpleNamespace(id=user_id)
     update = types.SimpleNamespace(
         message=message,
@@ -82,7 +84,7 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
     )
 
     async def run_workflow() -> None:
-        result = await workflow.get_contacts(update, context)
+        result = await workflow.get_delivery(update, context)
         assert result is workflow.ConversationHandler.END
 
     asyncio.run(run_workflow())
@@ -95,6 +97,16 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
         workflow.get_message("workflow.summary_contacts", value="@seller")
         in summary_text
     )
+    assert (
+        workflow.get_message("workflow.summary_metro", value="Павелецкая")
+        in summary_text
+    )
+    assert (
+        workflow.get_message(
+            "workflow.summary_delivery", value="Да, отправлю доставкой"
+        )
+        in summary_text
+    )
 
     acknowledgement_text, acknowledgement_parse_mode = message.replies[1]
     assert acknowledgement_parse_mode == "Markdown"
@@ -102,6 +114,8 @@ def test_get_contacts_persists_submission(tmp_path: Path, bot_modules) -> None:
 
     record = client.hgetall(f"{prefix}:{session_key}")
     assert record["contacts"] == "@seller"
+    assert record["metro"] == "Павелецкая"
+    assert record["delivery"] == "Да, отправлю доставкой"
     assert record["user_id"] == str(user_id)
     assert f"{prefix}:{session_key}" in client.smembers(
         f"{prefix}:user:{user_id}:applications"

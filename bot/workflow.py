@@ -12,8 +12,10 @@ from bot.admin import record_active_user
 from bot.constants import (
     CONDITION,
     CONTACTS,
+    DELIVERY,
     DESCRIPTION,
     MATERIAL,
+    METRO,
     PHOTOS,
     PRICE,
     SIZE,
@@ -256,6 +258,50 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     store.set_fields(user.id, contacts=update.message.text)
     user_data["contacts"] = update.message.text
     logger.info("User {} provided contacts", user.id)
+    await update.message.reply_text(
+        get_message("workflow.metro_prompt"), parse_mode="Markdown"
+    )
+    return METRO
+
+
+async def get_metro(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        logger.warning("Metro handler called without message or user: {}", update)
+        return ConversationHandler.END
+
+    store = get_application_store(context)
+    user_data = store.get(user.id)
+    if not user_data:
+        logger.warning("Metro handler could not locate session for user {}", user.id)
+        await update.message.reply_text(get_message("general.session_missing"))
+        return ConversationHandler.END
+
+    store.set_fields(user.id, metro=update.message.text)
+    user_data["metro"] = update.message.text
+    logger.info("User {} provided metro preference", user.id)
+    await update.message.reply_text(
+        get_message("workflow.delivery_prompt"), parse_mode="Markdown"
+    )
+    return DELIVERY
+
+
+async def get_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if update.message is None or user is None:
+        logger.warning("Delivery handler called without message or user: {}", update)
+        return ConversationHandler.END
+
+    store = get_application_store(context)
+    user_data = store.get(user.id)
+    if not user_data:
+        logger.warning("Delivery handler could not locate session for user {}", user.id)
+        await update.message.reply_text(get_message("general.session_missing"))
+        return ConversationHandler.END
+
+    store.set_fields(user.id, delivery=update.message.text)
+    user_data["delivery"] = update.message.text
+    logger.info("User {} provided delivery preference", user.id)
 
     text_lines = [get_message("workflow.summary_header")]
     fields = [
@@ -265,7 +311,9 @@ async def get_contacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("workflow.summary_material", user_data.get("material", "")),
         ("workflow.summary_description", user_data.get("description", "")),
         ("workflow.summary_price", user_data.get("price", "")),
-        ("workflow.summary_contacts", update.message.text),
+        ("workflow.summary_contacts", user_data.get("contacts", "")),
+        ("workflow.summary_metro", user_data.get("metro", "")),
+        ("workflow.summary_delivery", update.message.text),
     ]
     for key, value in fields:
         text_lines.append(
@@ -537,6 +585,8 @@ def _persist_application(
         "description": user_data.get("description", ""),
         "price": user_data.get("price", ""),
         "contacts": user_data.get("contacts", ""),
+        "metro": user_data.get("metro", ""),
+        "delivery": user_data.get("delivery", ""),
         "photos": ",".join(photos),
         "session_dir": str(session_dir) if session_dir else "",
         "created_at": datetime.now(UTC).isoformat(),
@@ -570,7 +620,9 @@ __all__ = [
     "get_condition",
     "get_contacts",
     "get_description",
+    "get_delivery",
     "get_material",
+    "get_metro",
     "get_photos",
     "get_position",
     "get_price",
