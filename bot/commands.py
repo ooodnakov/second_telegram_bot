@@ -288,6 +288,8 @@ def _format_detail_text(submission: dict[str, str]) -> str:
         ("list.detail_description", submission.get("description", "")),
         ("list.detail_price", submission.get("price", "")),
         ("list.detail_contacts", submission.get("contacts", "")),
+        ("list.detail_metro", submission.get("metro", "")),
+        ("list.detail_delivery", submission.get("delivery", "")),
     ]
     for key, value in fields:
         lines.append(get_message(key, value=value or placeholder))
