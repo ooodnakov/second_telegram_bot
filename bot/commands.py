@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import html
 from datetime import datetime
@@ -234,21 +235,21 @@ def _extract_photo_paths(submission: dict[str, str]) -> list[str]:
     return handles
 
 
-def _cached_photo_paths(
+async def _cached_photo_paths(
     context: ContextTypes.DEFAULT_TYPE, handles: list[str]
 ) -> list[Path]:
     storage = get_media_storage(context)
-    cached_paths = storage.cache_photos(handles)
+    cached_paths = await storage.cache_photos(handles)
     return [path for path in cached_paths if path.exists()]
 
 
-def _list_cover_path(context: ContextTypes.DEFAULT_TYPE) -> Path | None:
+async def _list_cover_path(context: ContextTypes.DEFAULT_TYPE) -> Path | None:
     local_path = MEDIA_ROOT / "applications.png"
     if local_path.exists():
         return local_path
     storage = get_media_storage(context)
     try:
-        path = storage.cache_photo("applications.png")
+        path = await asyncio.to_thread(storage.cache_photo, "applications.png")
     except FileNotFoundError:
         return None
     return path if path.exists() else None
@@ -298,11 +299,11 @@ def _format_detail_text(submission: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-def _available_photo_paths(
+async def _available_photo_paths(
     context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
 ) -> list[Path]:
     handles = _extract_photo_paths(submission)
-    return _cached_photo_paths(context, handles)
+    return await _cached_photo_paths(context, handles)
 
 
 def _open_photo_stream(photo_paths: list[Path], photo_index: int):
@@ -408,7 +409,7 @@ async def list_applications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state.pop("chat_id", None)
     text, keyboard, current_page = _render_applications_page(submissions, 0, user.id)
     state["page"] = current_page
-    cover_path = _list_cover_path(context)
+    cover_path = await _list_cover_path(context)
     if cover_path is None:
         await update.message.reply_text(text, reply_markup=keyboard)
     else:
@@ -475,7 +476,7 @@ async def paginate_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     text, keyboard, current_page = _render_applications_page(submissions, page, user.id)
     state["page"] = current_page
-    cover_path = _list_cover_path(context)
+    cover_path = await _list_cover_path(context)
     if cover_path is not None and query.message is not None:
         try:
             await query.edit_message_caption(caption=text, reply_markup=keyboard)
@@ -580,7 +581,7 @@ async def show_application_detail(
     await query.answer()
 
     text = _format_detail_text(submission)
-    photo_paths = _available_photo_paths(context, submission)
+    photo_paths = await _available_photo_paths(context, submission)
     photo_total = len(photo_paths)
     photo_indexes = state.setdefault("photo_indexes", {})
     previous_session_key = state.get("current_session_key")
@@ -682,7 +683,7 @@ async def _navigate_list_photo(
         await query.answer(get_message("general.session_missing"), show_alert=True)
         return
 
-    photo_paths = _available_photo_paths(context, submission)
+    photo_paths = await _available_photo_paths(context, submission)
     photo_total = len(photo_paths)
     if photo_total == 0:
         await query.answer(get_message("admin.photo_missing"), show_alert=False)
@@ -771,7 +772,7 @@ async def refresh_application_detail(
 
     page = state.get("page", 0)
     text = _format_detail_text(submission)
-    photo_paths = _available_photo_paths(context, submission)
+    photo_paths = await _available_photo_paths(context, submission)
     photo_total = len(photo_paths)
     photo_indexes = state.setdefault("photo_indexes", {})
     photo_index = photo_indexes.get(session_key, 0)

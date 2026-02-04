@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -70,11 +71,13 @@ class MediaStorage(ABC):
     def cache_photo(self, handle: str) -> Path:
         """Ensure ``handle`` is materialized locally and return the path."""
 
-    def cache_photos(self, handles: Iterable[str]) -> list[Path]:
+    async def cache_photos(self, handles: Iterable[str]) -> list[Path]:
         """Ensure a sequence of handles are cached locally."""
 
         cached: list[Path] = []
         seen: set[str] = set()
+        tasks = []
+
         for handle in handles:
             normalized = handle.strip() if isinstance(handle, str) else ""
             if not normalized or normalized in seen:
@@ -83,14 +86,23 @@ class MediaStorage(ABC):
                 logger.warning(f"Skipping suspicious photo handle {normalized}")
                 continue
             seen.add(normalized)
-            try:
-                path = self.cache_photo(normalized)
-            except FileNotFoundError:
-                logger.warning(f"Photo handle {normalized} could not be cached")
-                continue
-            if path.exists():
+            tasks.append(asyncio.to_thread(self._safe_cache_photo, normalized))
+
+        if not tasks:
+            return []
+
+        results = await asyncio.gather(*tasks)
+        for path in results:
+            if path and path.exists():
                 cached.append(path)
         return cached
+
+    def _safe_cache_photo(self, handle: str) -> Path | None:
+        try:
+            return self.cache_photo(handle)
+        except FileNotFoundError:
+            logger.warning(f"Photo handle {handle} could not be cached")
+            return None
 
     def open_photo_stream(self, handle: str):
         """Open a binary stream for the provided photo handle."""
