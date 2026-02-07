@@ -475,7 +475,7 @@ async def _send_submission_photos(
     photo_handles: list[str],
 ) -> None:
     storage = get_media_storage(context)
-    cached_paths = storage.cache_photos(photo_handles)
+    cached_paths = await storage.cache_photos(photo_handles)
     existing_photos = [photo_path for photo_path in cached_paths if photo_path.exists()]
     if not existing_photos:
         logger.debug("No existing photos to send to chat {}", chat_id)

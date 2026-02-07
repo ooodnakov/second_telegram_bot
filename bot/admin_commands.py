@@ -388,7 +388,7 @@ async def _navigate_application_photo(
         )
         return
 
-    photo_paths = _available_photo_paths(context, submission)
+    photo_paths = await _available_photo_paths(context, submission)
     total = len(photo_paths)
     if total <= 1:
         await query.answer()
@@ -1504,18 +1504,19 @@ def _photo_handles(submission: dict[str, str]) -> list[str]:
     return handles
 
 
-def _photo_paths(
+async def _photo_paths(
     context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
 ) -> list[Path]:
     storage = get_media_storage(context)
     handles = _photo_handles(submission)
-    return storage.cache_photos(handles)
+    return await storage.cache_photos(handles)
 
 
-def _available_photo_paths(
+async def _available_photo_paths(
     context: ContextTypes.DEFAULT_TYPE, submission: dict[str, str]
 ) -> list[Path]:
-    return [path for path in _photo_paths(context, submission) if path.exists()]
+    paths = await _photo_paths(context, submission)
+    return [path for path in paths if path.exists()]
 
 
 def _open_photo_stream(
@@ -1524,13 +1525,8 @@ def _open_photo_stream(
     photo_index: int = 0,
     photo_paths: Sequence[Path] | None = None,
 ) -> BytesIO | Any:
-    paths = (
-        photo_paths
-        if photo_paths is not None
-        else _available_photo_paths(context, submission)
-    )
-    if paths:
-        stream = paths[photo_index].open("rb")
+    if photo_paths:
+        stream = photo_paths[photo_index].open("rb")
         stream.seek(0)
         return stream
     placeholder = BytesIO(_PLACEHOLDER_PHOTO)
@@ -1651,7 +1647,7 @@ async def _render_admin_application(
         session_key not in photo_indexes or session_key != previous_session_key
     ):
         photo_indexes[session_key] = 0
-    photo_paths = _available_photo_paths(context, submission)
+    photo_paths = await _available_photo_paths(context, submission)
     photo_total = len(photo_paths)
     if session_key:
         photo_index = photo_indexes.get(session_key, 0)
