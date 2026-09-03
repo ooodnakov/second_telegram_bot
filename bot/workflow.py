@@ -324,13 +324,15 @@ async def get_delivery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_handles: list[str] = list(user_data.get("photos", []))
     logger.debug("User {} submission includes {} photos", user.id, len(photo_handles))
 
+    # Persist before any Telegram API call can fail on user-supplied content.
+    _persist_application(update, context, user_data)
+
     chat = update.effective_chat
     chat_id = chat.id if chat is not None else user.id
     await _send_submission_photos(context, chat_id, photo_handles)
 
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text)
 
-    _persist_application(update, context, user_data)
     await _forward_to_moderators(context, text, photo_handles)
     await update.message.reply_text(
         get_message("workflow.submission_received"), parse_mode="Markdown"
@@ -460,7 +462,6 @@ async def _forward_to_moderators(
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=text,
-                parse_mode="Markdown",
             )
             logger.info("Forwarded submission to moderator chat {}", chat_id)
         except TelegramError:

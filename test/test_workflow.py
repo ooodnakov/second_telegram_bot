@@ -22,11 +22,11 @@ def test_get_delivery_persists_submission(tmp_path: Path, bot_modules) -> None:
         "session_key": session_key,
         "session_dir": session_dir,
         "photos": [photo_path],
-        "position": "Coat",
+        "position": "Coat * [test]",
         "condition": "Used",
         "size": "M",
-        "material": "Wool",
-        "description": "Warm coat",
+        "material": "Wool * [test]",
+        "description": "Warm [coat]",
         "price": "1000",
         "contacts": "@seller",
         "metro": "Павелецкая",
@@ -91,7 +91,7 @@ def test_get_delivery_persists_submission(tmp_path: Path, bot_modules) -> None:
 
     assert len(message.replies) == 2
     summary_text, summary_parse_mode = message.replies[0]
-    assert summary_parse_mode == "Markdown"
+    assert summary_parse_mode is None
     assert summary_text.startswith(workflow.get_message("workflow.summary_header"))
     assert (
         workflow.get_message("workflow.summary_contacts", value="@seller")
