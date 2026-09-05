@@ -40,4 +40,5 @@ COPY --chown=rem:rem config.ini ./config.ini
 
 USER rem
 
-ENTRYPOINT ["uv", "run", "python", "-m", "bot.reloader"]
+# Run the production process directly so Docker can restart it on failure.
+ENTRYPOINT ["uv", "run", "python", "-m", "bot.main"]
